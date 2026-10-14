@@ -432,6 +432,19 @@ class MainActivity : AppCompatActivity() {
             }
         })
         parent.addView(Button(this).apply {
+            text = "Redraw key labels"
+            textSize = 13f
+            isAllCaps = false
+            setOnClickListener {
+                val t = transport
+                if (t == null) {
+                    toast("Deck not started")
+                } else {
+                    pushAllKeyImages(t)
+                }
+            }
+        })
+        parent.addView(Button(this).apply {
             text = "Connect deck (starts USB reader)"
             textSize = 13f
             isAllCaps = false
@@ -470,6 +483,30 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Render and push every key face to the deck.
+     *
+     * The deck's keys are little LCDs; each needs its label drawn as JPEG and
+     * sent as a sequence of 1024-byte output reports. KeyImage rotates the
+     * bitmap 180 degrees, which this hardware family requires or the label
+     * renders upside down.
+     */
+    private fun pushAllKeyImages(t: DeckTransport) {
+        if (!t.isConnected()) {
+            Log.i("DeckBridge", "pushAllKeyImages: deck not connected")
+            return
+        }
+        t.clearAllKeys()
+        for (i in 0 until DeckProtocol.KEY_COUNT) {
+            val cmd = commands.getOrNull(i)
+            val label = cmd?.label?.ifBlank { null } ?: cmd?.text?.take(18) ?: ""
+            val jpeg = KeyImage.render(label, i, active = !cmd?.text.isNullOrBlank())
+            t.sendKeyImage(i, jpeg)
+            Log.i("DeckBridge", "queued key $i label='$label' ${jpeg.size}B")
+        }
+        log("pushed ${DeckProtocol.KEY_COUNT} key labels")
+    }
+
+    /**
      * Deck observers exist only so an attached deck lights its keys and can be
      * diagnosed. Nothing in the primary flow depends on them.
      */
@@ -478,7 +515,10 @@ class MainActivity : AppCompatActivity() {
             t.state.collect { st ->
                 if (st is DeckTransport.State.Connected) {
                     t.clearAllKeys()
-                    for (k in 0 until DeckProtocol.KEY_COUNT) t.fillKey(k, 0, 40, 90)
+                    // Draw the label on every key face, so the physical deck shows
+                    // what each button does. Nothing called sendKeyImage before, so
+                    // the LCDs stayed blank.
+                    pushAllKeyImages(t)
                 }
             }
         }

@@ -348,6 +348,18 @@ class DeckTransport(private val ctx: Context) {
         startWorker(conn)
         bringUp()
         startReader(conn)
+
+        // ANNOUNCE THE CONNECTION.
+        //
+        // State.Connected was declared but never assigned anywhere, so nothing
+        // downstream could tell the deck had opened: the UI said "no deck
+        // detected", the key-label push never ran, and the re-arm watchdog never
+        // engaged. Emit it now that the interface is claimed, the worker is up
+        // and the wake sequence has been queued.
+        _state.value = State.Connected(
+            product = dev.productName ?: "Stream Deck",
+            serial = serial
+        )
     }
 
     // =====================================================================
@@ -394,6 +406,23 @@ class DeckTransport(private val ctx: Context) {
         // 3. Brightness wake, then disable sleep so it keeps reporting.
         queue.trySend(Op.Feature(DeckProtocol.buildBrightness(60), "brightness60"))
         queue.trySend(Op.Feature(DeckProtocol.buildSleepDuration(0), "sleepOff"))
+    }
+
+    /**
+     * Wake the panel WITHOUT clearing the key faces.
+     *
+     * bringUp() sends `resetKeyStream`, which by design blanks every key image.
+     * That is right at connect time, but it is destructive during the re-arm
+     * loop: reads return -1 constantly on this hardware, so re-arming with
+     * bringUp() wiped the labels every few seconds. The user saw them "flash
+     * briefly then go blank", which is exactly this.
+     *
+     * So a re-arm only nudges brightness and re-asserts no-sleep. The images
+     * already on the panel survive.
+     */
+    fun wake() {
+        queue.trySend(Op.Feature(DeckProtocol.buildBrightness(60), "wake-brightness"))
+        queue.trySend(Op.Feature(DeckProtocol.buildSleepDuration(0), "wake-sleepOff"))
     }
 
     // =====================================================================
@@ -542,8 +571,10 @@ class DeckTransport(private val ctx: Context) {
                 // has stopped reporting and needs waking.
                 consecutiveFails++
                 if (consecutiveFails == 10 || consecutiveFails == 40 || consecutiveFails == 120) {
-                    Log.w(TAG, "read failed x$consecutiveFails (-1); re-arming")
-                    bringUp()
+                    Log.w(TAG, "read failed x$consecutiveFails (-1); waking panel")
+                    // wake(), NOT bringUp(): the latter resets the key stream and
+                    // wipes the labels off the LCDs.
+                    wake()
                 }
                 delay(READ_RETRY_DELAY_MS)
             }
