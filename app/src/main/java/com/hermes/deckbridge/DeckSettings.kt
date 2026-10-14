@@ -1,0 +1,65 @@
+package com.hermes.deckbridge
+
+import android.content.Context
+import org.json.JSONObject
+import java.io.File
+
+/**
+ * Persisted deck settings. Currently just backlight brightness.
+ *
+ * WHY this exists: brightness was hardcoded to 60 in two places (bringUp and
+ * wake). The panel is powered from the phone's battery over USB, so a user who
+ * wants to conserve charge had no way to dim it. Worse, because wake() is called
+ * on every re-arm and the re-arm loop fires often on this flaky USB link, any
+ * one-off brightness write would have been stomped within seconds. So the value
+ * has to be persisted AND every brightness send has to read from here rather
+ * than from a literal.
+ *
+ * Range matches the hardware: 0x00..0x64 (0..100). 0 turns the backlight off
+ * entirely, which is a legitimate "I am not looking at this right now" mode and
+ * the most aggressive battery saving available on the panel side.
+ *
+ * JSON next to commands.json, for the same reason: trivially editable and
+ * pushable over adb when scripting a device from a workstation.
+ */
+class DeckSettings(private val ctx: Context) {
+
+    private val file: File get() = File(ctx.filesDir, "settings.json")
+
+    /** Backlight brightness, 0..100. Default 60 is what the app used before. */
+    fun brightness(): Int = runCatching {
+        if (file.exists()) JSONObject(file.readText()).optInt("brightness", DEFAULT)
+        else DEFAULT
+    }.getOrDefault(DEFAULT).coerceIn(0, 100)
+
+    fun setBrightness(percent: Int) {
+        val v = percent.coerceIn(0, 100)
+        runCatching {
+            val o = if (file.exists()) JSONObject(file.readText()) else JSONObject()
+            o.put("brightness", v)
+            file.writeText(o.toString())
+        }
+    }
+
+    companion object {
+        const val DEFAULT = 60
+
+        /**
+         * Read the brightness without holding a DeckTransport reference.
+         * Used from services that only have a Context.
+         */
+        fun brightnessOf(ctx: Context): Int = DeckSettings(ctx).brightness()
+
+        /**
+         * Named presets, cheapest first. Ordered so the UI and any future deck
+         * key cycle through them in a predictable direction.
+         */
+        val PRESETS = listOf(
+            0 to "Off",
+            20 to "Dim",
+            40 to "Low",
+            60 to "Normal",
+            100 to "Bright",
+        )
+    }
+}

@@ -402,6 +402,47 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(4), 0, dp(4), dp(8))
         })
 
+        // ---- Brightness ------------------------------------------------
+        // The panel is powered from the phone over USB, so dimming it is the one
+        // panel-side way to save battery. This row is the user-facing control;
+        // the value is persisted and re-applied on every connect and re-arm.
+        val brightnessRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        val brightnessLabel = TextView(this).apply {
+            textSize = 13f
+            setPadding(0, 0, dp(8), 0)
+        }
+        brightnessRow.addView(brightnessLabel)
+        parent.addView(brightnessRow)
+
+        fun refreshBrightnessLabel() {
+            val cur = DeckSettings.brightnessOf(this)
+            val name = DeckSettings.PRESETS.firstOrNull { it.first == cur }?.second
+                ?: "$cur%"
+            brightnessLabel.text = "Brightness: $name ($cur%)"
+        }
+
+        val presetRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        DeckSettings.PRESETS.forEach { (pct, name) ->
+            presetRow.addView(Button(this).apply {
+                text = name
+                textSize = 12f
+                isAllCaps = false
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener {
+                    transport?.setBrightness(pct)
+                    refreshBrightnessLabel()
+                    toast("Deck brightness: $name ($pct%)")
+                }
+            })
+        }
+        parent.addView(presetRow)
+        refreshBrightnessLabel()
+
         parent.addView(Button(this).apply {
             text = "Enable typing service"
             textSize = 13f

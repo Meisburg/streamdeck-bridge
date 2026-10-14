@@ -404,7 +404,9 @@ class DeckTransport(private val ctx: Context) {
         // 2. Feature reset (show logo) on the FEATURE channel.
         queue.trySend(Op.Feature(DeckProtocol.buildShowLogo(), "reset"))
         // 3. Brightness wake, then disable sleep so it keeps reporting.
-        queue.trySend(Op.Feature(DeckProtocol.buildBrightness(60), "brightness60"))
+        //    Read from settings, NOT a literal: wake() runs on every re-arm and
+        //    would otherwise stomp a dimmed panel back to 60 within seconds.
+        queue.trySend(Op.Feature(DeckProtocol.buildBrightness(brightness()), "brightness${brightness()}"))
         queue.trySend(Op.Feature(DeckProtocol.buildSleepDuration(0), "sleepOff"))
     }
 
@@ -421,7 +423,8 @@ class DeckTransport(private val ctx: Context) {
      * already on the panel survive.
      */
     fun wake() {
-        queue.trySend(Op.Feature(DeckProtocol.buildBrightness(60), "wake-brightness"))
+        val b = brightness()
+        queue.trySend(Op.Feature(DeckProtocol.buildBrightness(b), "wake-brightness$b"))
         queue.trySend(Op.Feature(DeckProtocol.buildSleepDuration(0), "wake-sleepOff"))
     }
 
@@ -603,8 +606,20 @@ class DeckTransport(private val ctx: Context) {
     // =====================================================================
 
     fun setBrightness(percent: Int) {
-        queue.trySend(Op.Write(DeckProtocol.buildBrightnessOutput(percent), "brightness$percent"))
+        val v = percent.coerceIn(0, 100)
+        // Persist FIRST, so a re-arm/reboot restores the user's choice rather
+        // than snapping back to the default.
+        DeckSettings(ctx).setBrightness(v)
+        // Send on BOTH channels. The feature report is what the panel actually
+        // honours on this revision; the output report is kept because the older
+        // path used it and some firmware revisions accept only that.
+        queue.trySend(Op.Feature(DeckProtocol.buildBrightness(v), "brightness$v"))
+        queue.trySend(Op.Write(DeckProtocol.buildBrightnessOutput(v), "brightness-out$v"))
+        Log.i(TAG, "brightness set to $v")
     }
+
+    /** The persisted brightness, 0..100. */
+    fun brightness(): Int = DeckSettings.brightnessOf(ctx)
 
     fun fillKey(keyIndex: Int, r: Int, g: Int, b: Int) {
         queue.trySend(Op.Write(DeckProtocol.buildFillKeyOutput(keyIndex, r, g, b), "fillKey$keyIndex"))
@@ -634,7 +649,7 @@ class DeckTransport(private val ctx: Context) {
      * brightness write brings it back without restarting the app.
      */
     fun rearm() {
-        queue.trySend(Op.Feature(DeckProtocol.buildBrightness(60), "rearm-brightness"))
+        queue.trySend(Op.Feature(DeckProtocol.buildBrightness(brightness()), "rearm-brightness${brightness()}"))
         queue.trySend(Op.Write(DeckProtocol.buildResetKeyStream(), "rearm-reset"))
         Log.i(TAG, "rearm queued")
     }
