@@ -75,7 +75,6 @@ class CommandReceiver : BroadcastReceiver() {
     }
 
     private fun parseTarget(s: String?): Command.Target = when (s?.lowercase()) {
-        "termux", "terminal" -> Command.Target.TERMUX
         "discord", "chat", "text" -> Command.Target.DISCORD
         else -> Command.Target.AUTO
     }

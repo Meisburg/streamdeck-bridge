@@ -19,7 +19,7 @@ data class Command(
     val label: String,
     val text: String,
     val target: Target = Target.AUTO,
-    /** Discord: press Enter after the text. Termux: run it as a shell command. */
+    /** Press Enter after the text, submitting it in the target app. */
     val submit: Boolean = true,
 ) {
     enum class Target {
@@ -29,8 +29,6 @@ data class Command(
         /** Send as chat text into an editable field (Discord and friends). */
         DISCORD,
 
-        /** Send to Termux, either typed at the prompt or run as a command. */
-        TERMUX,
     }
 
     fun toJson(): JSONObject = JSONObject().apply {

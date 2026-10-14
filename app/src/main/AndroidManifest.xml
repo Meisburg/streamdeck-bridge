@@ -6,14 +6,6 @@
         android:name="android.hardware.usb.host"
         android:required="true" />
 
-    <!--
-      Required to run shell commands inside Termux via its RUN_COMMAND API.
-      Termux additionally requires the F-Droid build and
-      "allow-external-apps = true" in ~/.termux/termux.properties; the Play
-      Store build does not declare this permission at all.
-    -->
-    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
-
     <!-- Keep the process resident so the accessibility binding survives. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -21,26 +13,24 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!--
-      Lets DeckBridge swap the system input method itself, so it can type
-      visibly into Termux and then hand the keyboard straight back to the user's
-      own keyboard.
+      Lets DeckBridge swap the system input method itself, so it can emit a real
+      Enter key event and then hand the keyboard straight back to the user's own
+      keyboard.
 
-      This is a signature|privileged permission, so Android will NOT grant it
-      from a normal install prompt and the app must never assume it is present.
-      Grant it once over adb:
+      Some web composers (Collie, and any React textarea) submit on a keydown,
+      not on an editor action, so a genuine key event is the only way to make
+      them send. This is a signature|privileged permission, so Android will NOT
+      grant it from a normal install prompt and the app must never assume it is
+      present. Grant it once over adb:
 
           pm grant com.hermes.deckbridge android.permission.WRITE_SECURE_SETTINGS
 
-      Without it DeckBridge still works: it falls back to Termux's RUN_COMMAND
-      API for terminal delivery, which needs no keyboard swap at all.
+      Without it DeckBridge still works: ACTION_SET_TEXT plus ACTION_IME_ENTER
+      covers Discord and other ordinary text fields.
     -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
-
-    <queries>
-        <package android:name="com.termux" />
-    </queries>
 
     <application
         android:allowBackup="true"

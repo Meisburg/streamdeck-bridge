@@ -104,16 +104,45 @@ class DeckKeyboardService : InputMethodService() {
             }
             return try {
                 ic.beginBatchEdit()
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
-                ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
-                ic.commitText("\n", 1)
+                sendEnterVariants(ic)
                 ic.endBatchEdit()
-                Log.i(TAG, "commitEnter ok")
+                Log.i(TAG, "commitEnter: sent DOWN+UP (66), NUMPAD_ENTER (160) and newline")
                 true
             } catch (t: Throwable) {
                 Log.w(TAG, "commitEnter failed: ${t::class.java.simpleName} ${t.message}")
                 false
             }
+        }
+
+        /**
+         * Push Enter through every route a target might listen on.
+         *
+         * KEYCODE_ENTER is 66 and that IS the correct value; the problem is that
+         * `InputConnection.sendKeyEvent` is advisory. Web views and some custom
+         * views ignore it, or only look at the DOWN, or bind to the newer
+         * keyCode 160 (NUMPAD_ENTER) instead. Sending all of them costs nothing
+         * and removes the guesswork:
+         *
+         *   1. KEYCODE_ENTER DOWN + UP          (66, the standard key)
+         *   2. KEYCODE_NUMPAD_ENTER DOWN + UP   (160, what some web code binds)
+         *   3. a literal newline commit         (some editors only see text)
+         *
+         * The batch is closed by the caller so the target sees one edit.
+         */
+        private fun sendEnterVariants(ic: android.view.inputmethod.InputConnection) {
+            // Send ONLY real key events. Deliberately no commitText("\n"):
+            //
+            // a newline COMMIT inserts a literal newline character, which a chat
+            // composer treats as "the user pressed Shift+Enter" -- it grows the
+            // message box and never submits. That is why a field ended up holding
+            // "text\n\n\n" while nothing ever sent. Enter has to be a KEY, not a
+            // character.
+            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
+            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+
+            // Some web composers only bind the numeric-keypad Enter.
+            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_NUMPAD_ENTER))
+            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_NUMPAD_ENTER))
         }
     }
 
@@ -133,11 +162,17 @@ class DeckKeyboardService : InputMethodService() {
         }
         return try {
             ic.beginBatchEdit()
+            // Real KEY events only -- no commitText("\n").
+            //
+            // A committed newline is a CHARACTER, and a chat composer reads it as
+            // Shift+Enter: the box grows and never sends. The field was found
+            // holding "text\n\n\n", which is exactly this bug. Enter must be a key.
             ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
             ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
-            ic.commitText("\n", 1)
+            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_NUMPAD_ENTER))
+            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_NUMPAD_ENTER))
             ic.endBatchEdit()
-            Log.i(TAG, "commitEnter ok")
+            Log.i(TAG, "commitEnter: sent key 66 and 160 (no newline commit)")
             true
         } catch (t: Throwable) {
             Log.w(TAG, "commitEnter failed: ${t::class.java.simpleName} ${t.message}")

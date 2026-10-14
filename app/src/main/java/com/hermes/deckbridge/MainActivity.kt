@@ -209,15 +209,13 @@ class MainActivity : AppCompatActivity() {
                     arrayOf(
                         "Edit",
                         "Delete",
-                        "Send as-is to Termux",
                         "Send as-is to Discord",
                     )
                 ) { _, which ->
                     when (which) {
                         0 -> editCommand(cmd)
                         1 -> deleteCommand(cmd)
-                        2 -> sendForced(cmd, Command.Target.TERMUX)
-                        3 -> sendForced(cmd, Command.Target.DISCORD)
+                        2 -> sendForced(cmd, Command.Target.DISCORD)
                     }
                 }
                 .show()
@@ -323,7 +321,7 @@ class MainActivity : AppCompatActivity() {
         layout.addView(TextView(this).apply { text = "\nWhere to send it"; textSize = 12f })
         layout.addView(targetRow)
         layout.addView(TextView(this).apply {
-            text = "Auto picks Termux when Termux is in front, otherwise the chat box."
+            text = "Sends into whatever text field is focused."
             textSize = 10f
             setAlpha(0.7f)
         })
@@ -417,7 +415,7 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
         })
         parent.addView(Button(this).apply {
-            text = "Test Termux delivery"
+            text = "Test send (into focused app)"
             textSize = 13f
             isAllCaps = false
             setOnClickListener {
@@ -425,9 +423,20 @@ class MainActivity : AppCompatActivity() {
                 if (svc == null) {
                     toast("Typing service is off")
                 } else {
-                    svc.testTermux("printf 'DECKBRIDGE_TERMUX_OK\\n'") { r ->
-                        postLog("termux test -> $r")
-                    }
+                    // Send through the same path a deck press uses, so this is
+                    // a real end-to-end check rather than a special case.
+                    moveTaskToBack(true)
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        svc.runCommand(
+                            Command(
+                                id = "test",
+                                label = "test",
+                                text = "deckbridge test",
+                                target = Command.Target.DISCORD,
+                                submit = true,
+                            )
+                        ) { r -> Log.i("DeckBridge", "test send -> $r") }
+                    }, 350)
                 }
             }
         })

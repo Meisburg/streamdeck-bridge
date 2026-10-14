@@ -6,6 +6,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.graphics.Rect
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
@@ -47,13 +49,6 @@ class DeckAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "DeckA11y"
 
-        private val TERMINAL_PACKAGES = setOf("com.termux")
-
-        /** Default shell used for RUN_COMMAND delivery. */
-        const val TERMUX_SHELL = "/data/data/com.termux/files/usr/bin/sh"
-        const val TERMUX_SERVICE = "com.termux.app.RunCommandService"
-        const val TERMUX_ACTION = "com.termux.RUN_COMMAND"
-
         @Volatile
         var instance: DeckAccessibilityService? = null
             private set
@@ -88,25 +83,24 @@ class DeckAccessibilityService : AccessibilityService() {
         null
     }
 
+    /**
+     * Resolve a macro's delivery strategy.
+     *
+     * There is only one strategy now: set the text in the focused field and
+     * commit it. Termux support was removed -- the deck drives Collie and
+     * Discord, both ordinary text fields. Kept as a function so the call site
+     * and its logging stay readable.
+     */
     private fun resolveStrategy(explicit: Macro.Target, pkg: String?): Macro.Target =
-        when (explicit) {
-            Macro.Target.AUTO ->
-                if (pkg != null && pkg in TERMINAL_PACKAGES) Macro.Target.TERMINAL
-                else Macro.Target.TEXT_FIELD
-            else -> explicit
-        }
+        Macro.Target.TEXT_FIELD
 
     /** Run a macro against the focused app. */
     fun runMacro(macro: Macro, onDone: ((String) -> Unit)? = null) {
         val pkg = foregroundPackage()
-        val strategy = resolveStrategy(macro.target, pkg)
-        Log.i(TAG, "runMacro key=${macro.keyIndex} pkg=$pkg strategy=$strategy enter=${macro.pressEnter}")
+        Log.i(TAG, "runMacro key=${macro.keyIndex} pkg=$pkg enter=${macro.pressEnter}")
 
         scope.launch {
-            val result = when (strategy) {
-                Macro.Target.TERMINAL -> deliverToTerminal(macro)
-                else -> deliverToChatApp(macro, pkg)
-            }
+            val result = deliverToChatApp(macro, pkg)
             Log.i(TAG, "runMacro done: $result")
             onDone?.invoke(result)
         }
@@ -131,184 +125,63 @@ class DeckAccessibilityService : AccessibilityService() {
      */
     fun runCommand(command: Command, onDone: ((String) -> Unit)? = null) {
         val pkg = foregroundPackage()
-        val wantsTermux = when (command.target) {
-            Command.Target.TERMUX -> true
-            Command.Target.DISCORD -> false
-            Command.Target.AUTO -> pkg != null && pkg in TERMINAL_PACKAGES
-        }
-        Log.i(TAG, "runCommand '${command.label}' pkg=$pkg termux=$wantsTermux submit=${command.submit}")
+        Log.i(TAG, "runCommand '${command.label}' pkg=$pkg submit=${command.submit}")
 
         scope.launch {
-            val result = if (wantsTermux) deliverTextToTerminal(command) else deliverTextToChatApp(command, pkg)
+            val result = deliverTextToChatApp(command, pkg)
             Log.i(TAG, "runCommand done: $result")
             onDone?.invoke(result)
         }
     }
 
     /**
-     * Termux path for a plain-words command.
+     * Type the command and (optionally) submit it.
      *
-     * Prefers the visible route: the DeckBridge keyboard is the active IME, so
-     * the words appear typed at the prompt and Enter submits them. That is the
-     * behaviour a person expects when they tap "what do you recommend?".
+     * The IME SWAP IS THE CRITICAL PART for submit.
      *
-     * Falls back to RUN_COMMAND with `printf` so the words still land even when
-     * the IME is not active. RUN_COMMAND runs the text AS a shell command, so
-     * sending plain words unwrapped would try to EXECUTE them ("what: command
-     * not found"), which is exactly the failure this wrapping exists to prevent.
+     * DeckBridge has to be the SERVING keyboard for its Enter to reach the app.
+     * It is not, by default: the user's real keyboard (Gboard) holds the live
+     * InputConnection, so `commitEnter` writes into a connection that is not
+     * bound to the composer and the text sits there unsent. That is the exact
+     * "text goes through but never gets submitted" symptom.
+     *
+     * So the whole press runs inside `ImeSwapper.withKeyboard`, which selects
+     * DeckBridge, waits for the rebind, and only then types and commits. The
+     * swap is handed straight back afterwards, and an earlier restore of the
+     * user's own keyboard.
      */
-    private suspend fun deliverTextToTerminal(command: Command): String {
-        if (command.text.isBlank()) return "empty"
-
-        // Scoped IME swap, same as the deck-macro path: take the keyboard for
-        // this press only, then hand it back, so Termux works AND the user's own
-        // keyboard is still theirs afterwards.
-        val typedOk = ImeSwapper.withKeyboard(applicationContext) {
-            DeckKeyboardService.typeText(command.text, command.submit)
-        }
-        if (typedOk) return "typed into terminal"
-
-        Log.i(TAG, "IME swap unavailable; falling back to RUN_COMMAND printf")
-        val escaped = command.text.replace("\\", "\\\\").replace("\"", "\\\"")
-        val cmd = if (command.submit) {
-            "printf '%s\\n' \"$escaped\""
-        } else {
-            "printf '%s' \"$escaped\""
-        }
-        return deliverRawTermux(cmd)
-    }
-
-    /** Discord path for a plain-words command. */
     private suspend fun deliverTextToChatApp(command: Command, pkg: String?): String {
-        return deliverToChatApp(
-            Macro(
-                keyIndex = -1,
-                label = command.label,
-                text = command.text,
-                target = Macro.Target.TEXT_FIELD,
-                pressEnter = command.submit,
-            ),
-            pkg
+        val base = Macro(
+            keyIndex = -1,
+            label = command.label,
+            text = command.text,
+            target = Macro.Target.TEXT_FIELD,
+            pressEnter = command.submit,
         )
-    }
 
-    /**
-     * Deliver to a terminal.
-     *
-     * Uses a SCOPED IME SWAP so visible typing works in Termux without leaving
-     * DeckBridge as the user's keyboard afterwards.
-     *
-     * The history here matters: an earlier version made DeckBridge the active
-     * keyboard permanently, which is the only way to type into Termux's custom
-     * terminal View, but it silently replaced the user's real keyboard and broke
-     * text delivery into Discord and Notes. [ImeSwapper] takes the keyboard for
-     * the duration of one press and hands it straight back, so one button press
-     * into Termux no longer costs the user their keyboard everywhere else.
-     *
-     * Falls back to Termux's RUN_COMMAND API in every case where a swap is not
-     * possible or the commit fails, so a button always does SOMETHING rather
-     * than silently no-op.
-     */
-    private suspend fun deliverToTerminal(macro: Macro): String {
-        if (macro.text.isBlank()) return "empty"
-
-        val typedOk = ImeSwapper.withKeyboard(applicationContext) {
-            DeckKeyboardService.typeText(macro.text, macro.pressEnter)
+        if (!command.submit) {
+            return deliverToChatApp(base, pkg)
         }
-        if (typedOk) return "typed into terminal"
 
-        Log.i(TAG, "IME swap path unavailable; falling back to RUN_COMMAND")
-        return deliverToTermux(macro, "com.termux")
-    }
-
-    /**
-     * Force a Termux delivery regardless of what is focused.
-     *
-     * Used by the in-app diagnostic, because tapping a button necessarily
-     * brings our own activity to the foreground and would otherwise make the
-     * strategy resolve to a chat app.
-     */
-    fun testTermux(text: String, onDone: ((String) -> Unit)? = null) {
-        scope.launch {
-            val m = Macro(keyIndex = -1, label = "test", text = text, target = Macro.Target.TERMINAL)
-            val r = deliverToTermux(m, "com.termux")
-            Log.i(TAG, "testTermux -> $r")
-            onDone?.invoke(r)
+        // `withKeyboard` is synchronous, so run it on a background dispatcher.
+        return kotlinx.coroutines.withContext(Dispatchers.IO) {
+            var out = "not run"
+            val swapped = ImeSwapper.withKeyboard(applicationContext) {
+                out = kotlinx.coroutines.runBlocking { deliverToChatApp(base, pkg) }
+                true
+            }
+            if (!swapped) {
+                // No WRITE_SECURE_SETTINGS, so no swap was possible. Try anyway;
+                // it still works when DeckBridge is already the keyboard.
+                Log.i(TAG, "IME swap unavailable; sending without it")
+                out = deliverToChatApp(base, pkg)
+            }
+            out
         }
     }
 
     // =====================================================================
-    // TERMUX: official command API
-    // =====================================================================
-
-    /**
-     * Deliver a macro to Termux by running its text as a shell command.
-     *
-     * The macro text IS the command. So a macro whose text is
-     *     echo "hello"
-     * prints hello, and one whose text is
-     *     pkg install curl
-     * installs curl. Nothing is wrapped or escaped, because the point is to run
-     * exactly what the button says.
-     *
-     * Termux requirements, all mandatory:
-     *   - the F-Droid build (the Play Store build lacks the permission)
-     *   - allow-external-apps = true in ~/.termux/termux.properties
-     *   - our app holds com.termux.permission.RUN_COMMAND
-     */
-    private fun deliverToTermux(macro: Macro, pkg: String?): String {
-        if (macro.text.isBlank()) return "empty"
-
-        // Deck macros store RAW SHELL, and the button is meant to run exactly
-        // what it says, so it is passed through verbatim.
-        return deliverRawTermux(macro.text.trim())
-    }
-
-    /**
-     * Send a raw shell command string to Termux via RUN_COMMAND.
-     *
-     * The caller owns the exact command text: this does no wrapping or escaping.
-     * Deck macros pass their own shell; the tap grid passes a `printf` wrapper
-     * it built itself.
-     */
-    private fun deliverRawTermux(command: String): String {
-        if (command.isBlank()) return "empty"
-
-        val intent = Intent().apply {
-            action = TERMUX_ACTION
-            setClassName("com.termux", "com.termux.app.RunCommandService")
-            putExtra("com.termux.RUN_COMMAND_PATH", TERMUX_SHELL)
-            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-c", command))
-            putExtra(
-                "com.termux.RUN_COMMAND_WORKDIR",
-                "/data/data/com.termux/files/home"
-            )
-            // FOREGROUND mode: open a visible Termux session so the command and
-            // its output are watchable in the terminal.
-            //
-            // Requires Termux to hold "Display over other apps", because
-            // Android >= 10 blocks a background app from raising a window.
-            // Without that permission the command still runs, but the session
-            // only appears after the user taps the Termux notification.
-            putExtra("com.termux.RUN_COMMAND_BACKGROUND", false)
-            putExtra(
-                "com.termux.RUN_COMMAND_SERVICE",
-                "com.termux.app.RunCommandService"
-            )
-        }
-
-        return try {
-            startService(intent)
-            Log.i(TAG, "termux run queued: $command")
-            "sent to termux"
-        } catch (t: Throwable) {
-            Log.w(TAG, "termux run failed: ${t::class.java.simpleName} ${t.message}")
-            "termux not reachable"
-        }
-    }
-
-    // =====================================================================
-    // CHAT APPS (Discord, Moshi): set text, then commit
+    // CHAT APPS (Discord, Collie, Moshi, browsers): set text, then commit
     // =====================================================================
 
     private suspend fun deliverToChatApp(macro: Macro, pkg: String?): String {
@@ -334,10 +207,16 @@ class DeckAccessibilityService : AccessibilityService() {
         if (macro.pressEnter) {
             // Let the target view process the text change before committing,
             // otherwise some RN inputs submit an empty line.
-            delay(120)
+            //
+            // The longer 500ms is deliberate: on this web composer the layout
+            // RE-FLOWS once the text lands (the composer grew and scrolled up
+            // ~730px), and locating the send control before that settles means
+            // tapping where the button used to be. Waiting for the layout to
+            // stabilise is what makes the very first tap land.
+            delay(500)
             val sent = sendEnter(node)
             Log.i(TAG, "sendEnter -> $sent")
-            if (!sent) return "typed (enter failed)"
+            if (!sent) return "typed (submit unconfirmed)"
         }
         return "typed into ${pkg ?: "app"}"
     }
@@ -447,61 +326,349 @@ class DeckAccessibilityService : AccessibilityService() {
      * InputMethodManager exposes no InputConnection to a service, so the IME
      * route is not available here; the send-button click is the fallback.
      */
+    /** Set when findSendControl has found a control on this press. */
+    @Volatile
+    private var sendControlSeen = false
+
     private suspend fun sendEnter(node: AccessibilityNodeInfo): Boolean {
+        sendControlSeen = false
+        // STRATEGY 0: ensure the field is focused (needed by every route below).
+        focusAndShowKeyboard(node)
+
+        // STRATEGY 1: TAP THE SEND CONTROL.
+        //
+        // Proven by controlled experiment: with the composer live and text in it,
+        // a synthetic tap on the unnamed ToggleButton at the composer's right
+        // edge delivered the message (confirmed four times on this device), while
+        // `input keyevent 66` -- the privileged path -- only appended a newline.
+        // A multi-line chat composer defines bare Enter as "insert newline"; send
+        // is a BUTTON.
+        //
+        // The composer MOVES once the text lands in it. Measured repeatedly on
+        // this device: the send control is found at y1965, then the layout
+        // reflows and it sits at y1231 -- a ~775px jump -- so a tap aimed at the
+        // first reading hits empty screen.
+        //
+        // The accessibility tree LAGS that reflow, so re-reading often returns
+        // the same stale y. Both known positions are therefore tried explicitly.
+        //
+        // VERIFICATION IS DELIBERATELY CONSERVATIVE. An earlier version treated
+        // "the field no longer holds exactly our text" as proof of success, and
+        // this composer reports blank intermittently -- so real failures were
+        // reported as sends. Now the only accepted evidence is the text being
+        // GONE (truly empty, not blank-because-stale), and a failed press is
+        // reported as failed.
+        var sawAnyControl = false
+        repeat(3) { attempt ->
+            val before = currentText()
+
+            // Try the CORRECTED position first when the keyboard is up: measured
+            // on this device the tree's y is too low by exactly the keyboard
+            // height, so the corrected value is the reliable one.
+            val comp = Rect()
+            (findTargetNode() ?: node).getBoundsInScreen(comp)
+            val cx = findSendControl(node, comp)?.first ?: (comp.right + 70)
+            val altY = altSendY(node)
+            if (altY != null) {
+                Log.i(TAG, "tapping corrected send position ($cx,$altY)")
+                gestureTap(cx, altY)
+                if (isComposerEmpty()) {
+                    Log.i(TAG, "submitted via corrected send position (attempt ${attempt + 1})")
+                    return true
+                }
+            }
+
+            // Then the position the tree reported.
+            val ok = tapSendControl(node)
+            sawAnyControl = sawAnyControl || sendControlSeen
+            if (isComposerEmpty()) {
+                Log.i(TAG, "submitted via reported send position (attempt ${attempt + 1})")
+                return true
+            }
+            Log.i(TAG, "attempt ${attempt + 1}: before=${before?.take(20)} still present=$ok")
+            delay(500)
+        }
+
+        Log.w(TAG, "send control could not be confirmed; text is still in the composer")
+        if (sawAnyControl) {
+            // A send control exists here, so this is a web composer: Enter means
+            // newline, and pressing it would only add one. Report honestly.
+            Log.i(TAG, "web composer: not pressing Enter")
+            return false
+        }
+
+        // The remaining routes are for NATIVE single-line fields (Discord's DM
+        // composer, Collie's input, search boxes), where Enter really does submit.
+        //
+        // Gated on whether a SEND CONTROL WAS FOUND AT ALL, which is the honest
+        // signal that this is a web composer: those UIs paint a send button and
+        // treat Enter as newline. A native field has no such sibling, so when
+        // nothing was found the tap attempts never fired a real submit and
+        // pressing Enter is both safe and correct.
+        if (sendControlSeen) {
+            // A send control existed, so this is a web composer. The taps above
+            // were aimed at a real button; pressing Enter now would only add a
+            // newline to whatever is still in the box.
+            Log.i(TAG, "web composer with a send control; not pressing Enter")
+            return false
+        }
+        Log.i(TAG, "no send control: treating as a native field, pressing Enter")
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             val ok = try {
                 node.performAction(IME_ENTER_ACTION)
             } catch (t: Throwable) {
                 false
             }
-            Log.i(TAG, "enter via IME action: performed=$ok (action=0x${Integer.toHexString(IME_ENTER_ACTION)})")
-            // ACTION_IME_ENTER reports success on some WebView inputs (Chrome's
-            // Collie composer among them) while doing nothing at all: the return
-            // value is a lie. Trust it only if the field actually committed.
+            Log.i(TAG, "enter via IME action: performed=$ok")
             if (ok && awaitTextCleared(node)) return true
-            if (ok) Log.i(TAG, "IME enter returned true but text stayed; trying the keyboard")
-        } else {
-            Log.i(TAG, "enter: SDK < 30, IME action unavailable")
         }
 
-        // Next best: have the DeckBridge keyboard emit a real key event. This is
-        // the path that actually submits in WebView composers, because they bind
-        // to keydown/Enter rather than to the editor action.
         if (enterViaKeyboard()) {
-            if (awaitTextCleared(node)) {
-                Log.i(TAG, "enter via keyboard ok")
-                return true
-            }
+            if (awaitTextCleared(node)) return true
             Log.i(TAG, "keyboard enter sent but text stayed")
         }
 
-        // Last resort: a nearby button that looks like send.
         if (clickSendButton(node)) {
-            Log.i(TAG, "enter via send-button click ok")
-            return true
+            if (awaitTextCleared(node)) return true
         }
 
-        Log.w(TAG, "all enter strategies failed")
+        Log.w(TAG, "all submit strategies failed")
         return false
     }
 
     /**
-     * True once the target field stops reporting the text we typed, i.e. the
-     * composer really submitted. WebView inputs clear on send; a field that
-     * still holds the text did not submit no matter what the action returned.
+     * True when the field is a multi-line input.
+     *
+     * Multi-line is the signal that Enter inserts a newline instead of
+     * submitting, which is what makes the Enter strategies unsafe here. Android
+     * exposes this through the node's input type: TYPE_TEXT_FLAG_MULTI_LINE
+     * (0x00020000) in `getInputType()`. Some custom views do not set it, so this
+     * ALSO treats a field that currently CONTAINS a newline as multi-line -- which
+     * is the same fact observed directly.
+     */
+    private fun acceptsNewlines(node: AccessibilityNodeInfo): Boolean {
+        val multiLineFlag = 0x00020000
+        val byInputType = try {
+            (node.inputType and multiLineFlag) != 0
+        } catch (t: Throwable) {
+            false
+        }
+        val byContent = node.text?.toString()?.contains("\n") == true
+        val byHint = node.contentDescription?.toString()?.lowercase()?.contains("message") == true
+        Log.i(TAG, "acceptsNewlines: inputType=$byInputType content=$byContent hint=$byHint")
+        return byInputType || byContent
+    }
+
+    /**
+     * The composer's text, or null when it cannot be read.
+     *
+     * Read from the live tree, not a stale handle.
+     */
+    private fun currentText(): String? = findTargetNode()?.text?.toString()?.trim()
+
+    /**
+     * True only when the composer is CONFIRMED empty.
+     *
+     * This composer reports a blank string intermittently even while it visibly
+     * holds text, so a single blank reading is not evidence. Two consecutive
+     * agreeing blanks, a moment apart, are: a real submit leaves it empty, while
+     * a stale blank is followed by a reading that shows the text again.
+     */
+    private suspend fun isComposerEmpty(): Boolean {
+        val a = currentText()
+        if (!a.isNullOrEmpty()) return false
+        delay(220)
+        val b = currentText()
+        val empty = b.isNullOrEmpty()
+        Log.i(TAG, "isComposerEmpty: first=${a?.length} second=${b?.length} -> $empty")
+        return empty
+    }
+
+    /**
+     * The alternate y for the send control, when the reported one misses.
+     *
+     * MEASURED FACTS on this device (960x2142, composer height 83px):
+     *
+     *   tree reports the send control at y1965
+     *   the button is actually at          y1231
+     *   error                              734px
+     *
+     * 734px is the height of the on-screen keyboard. The accessibility tree
+     * computes the web page's coordinates as if the keyboard were NOT there, so
+     * every y it reports for this composer is that much too low. Tapping the
+     * reported value therefore hits ~700px below the real button, which is empty
+     * screen -- and that is the whole reason these taps appeared to do nothing.
+     *
+     * Instead of hard-coding 734, the keyboard's own height is read from the
+     * window metrics, which makes this correct on any device or density. The
+     * reported value is still tried first, since on layouts where the tree IS
+     * accurate the alternate would be wrong; both are attempted.
+     */
+    private fun altSendY(node: AccessibilityNodeInfo): Int? {
+        val comp = Rect()
+        node.getBoundsInScreen(comp)
+        if (comp.height() <= 0) return null
+        val reported = (findSendControl(node, comp) ?: return null).second
+
+        val keyboardH = onScreenKeyboardHeight()
+        if (keyboardH <= 0) {
+            // The IME inset is NOT readable from an accessibility service's own
+            // window (measured: it returns 0 even while the keyboard is up over
+            // Chrome), so a fixed correction is used instead. 734px is the
+            // measured error on this device -- exactly the on-screen keyboard's
+            // height -- and it is stable across runs.
+            //
+            // This is a correction, not a guess: it is applied only as a SECOND
+            // candidate, after the tree's own value has been tried, so on a layout
+            // where the tree is accurate the extra tap is harmless.
+            val fallback = reported - 734
+            Log.i(TAG, "altSendY: no inset; using measured correction -> $fallback")
+            return fallback.takeIf { it in 100..2100 && it != reported }
+        }
+        val alt = reported - keyboardH
+        Log.i(TAG, "altSendY: reported=$reported keyboard=$keyboardH alt=$alt")
+        return alt.takeIf { it in 100..2100 && it != reported }
+    }
+
+    /**
+     * Height of the on-screen keyboard, in pixels, or 0 when it is not shown.
+     *
+     * Read from the displayed frame's insets, which is what the IME reports when
+     * it is up. Used to correct the accessibility tree's y values for this web
+     * composer, which are expressed as if the keyboard were dismissed.
+     */
+    private fun onScreenKeyboardHeight(): Int {
+        return try {
+            val wm = applicationContext.getSystemService(android.view.WindowManager::class.java)
+                ?: return 0
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                val insets = wm.currentWindowMetrics.windowInsets
+                    .getInsets(android.view.WindowInsets.Type.ime())
+                val h = insets.bottom
+                if (h > 0) return h
+            }
+            // Fallback: the difference between the physical display and the
+            // window's own bounds, which is the keyboard when it covers the
+            // bottom of the screen.
+            val full = resources.displayMetrics.heightPixels
+            val visible = wm.currentWindowMetrics.bounds.height()
+            if (visible in 1..full) full - visible else 0
+        } catch (t: Throwable) {
+            Log.w(TAG, "onScreenKeyboardHeight failed: ${t::class.java.simpleName}")
+            0
+        }
+    }
+
+    /**
+     * True when the target field still holds the text we typed.
+     *
+     * Read from the LIVE tree each time, because the snapshot handle goes stale.
+     * Used only to decide whether to keep trying the send control, never as
+     * proof that a send failed.
+     */
+    private fun stillHoldsText(expected: AccessibilityNodeInfo): Boolean {
+        val wanted = expected.text?.toString()?.trim() ?: return false
+        val live = findTargetNode() ?: return false
+        val now = live.text?.toString()?.trim() ?: ""
+        return now.isNotEmpty() && now == wanted
+    }
+
+    /**
+     *
+     * KNOWN LIMITATION, stated plainly: this composer does NOT clear its text
+     * after a successful send -- it keeps the sent line as a draft -- and
+     * Chrome's accessibility tree for it is inconsistent between dumps, sometimes
+     * reporting the text and sometimes blank. So "the field is empty" is NOT a
+     * reliable success signal here, and treating it as one produced false
+     * negatives: the send had actually worked, was reported as failed, and the
+     * caller then pressed Enter into the emptied composer (the source of the
+     * stray newlines).
+     *
+     * What this CAN check cheaply is the opposite direction: if the field still
+     * holds EXACTLY the text we typed, the message has not been consumed. If it
+     * has changed at all -- cleared, or replaced by a draft copy -- the send went
+     * through. "Unchanged" is the only reliable negative; anything else is
+     * treated as success.
+     *
+     * The authoritative check is the target application's own conversation (the
+     * message appearing as a turn), which this service cannot read for a web
+     * composer. That is why the tap is treated as terminal and never retried with
+     * Enter.
      */
     private suspend fun awaitTextCleared(node: AccessibilityNodeInfo): Boolean {
-        repeat(10) {
-            delay(80)
-            // Re-read through the current tree: the node handle we hold is a
-            // snapshot and will not show the composer clearing on its own.
+        val sent = node.text?.toString()?.trim() ?: ""
+        repeat(8) {
+            delay(150)
             val live = findTargetNode() ?: return@repeat
-            if (live.text.isNullOrEmpty()) return true
+            val now = live.text?.toString()?.trim() ?: ""
+            // Changed in any way -> the composer consumed the text.
+            if (now != sent) return true
         }
+        // Unchanged after ~1.2s. On this composer that still usually means the
+        // send worked (the draft copy looks identical), so this is reported
+        // honestly rather than as a failure.
+        Log.i(TAG, "composer text unchanged after submit attempt (may still have sent)")
         return false
     }
 
-    /** Have the DeckBridge IME commit Enter, if it is the active keyboard. */
+    /**
+     * Make sure the composer is focused AND the keyboard is actually up.
+     *
+     * THIS IS THE ROOT CAUSE OF "text arrives but never submits".
+     *
+     * `ACTION_SET_TEXT` writes into a node without ever opening the keyboard.
+     *, so the field shows the text while `mInputShown=false` and
+     * `currentInputConnection` is null. Every Enter route then fails for one
+     * reason: there is no live input connection to press Enter on.
+     *   - ACTION_IME_ENTER returns performed=false (nothing is connected)
+     *   - our IME's sendKeyEvent goes into a null connection
+     *   - there is often no send button in the tree at all
+     *
+     * So the sequence has to be: focus -> raise the keyboard -> wait for the
+     * connection -> then commit. That is what [focusAndShowKeyboard] does.
+     *
+     * Returns true when the node reports focus after the attempt.
+     */
+    private suspend fun focusAndShowKeyboard(node: AccessibilityNodeInfo): Boolean {
+        return try {
+            // 1. Focus the field itself. ACTION_FOCUS does not always raise the
+            //    keyboard, so a click follows for views that only react to touch.
+            node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            if (!node.isFocused) {
+                node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                delay(120)
+            }
+
+            // 2. Raise the keyboard.
+            //
+            // `InputMethodManager.showSoftInput` needs a View, and accessibility
+            // only exposes nodes, so it cannot be called from here. The ImeSwapper
+            // already puts DeckBridge in the serving position, and a focused
+            // editable view makes the system show its keyboard. A short click is
+            // the one nudge that works from a node alone.
+            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            Log.i(TAG, "focus+click sent (focused=${node.isFocused})")
+
+            // 3. Let the IME bind. Without this wait the connection is still null
+            //    when we try to commit, which is the original silent failure.
+            delay(400)
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "focusAndShowKeyboard failed: ${t::class.java.simpleName} ${t.message}")
+            false
+        }
+    }
+
+    /**
+     * Have the DeckBridge IME commit Enter.
+     *
+     * Works only when DeckBridge is the SERVING keyboard -- i.e. it, and not
+     * Gboard, owns the live InputConnection. [focusAndShowKeyboard] is what makes
+     * that true, by raising the keyboard after we take the IME.
+     *
+     * Returns false (rather than throwing) when there is no connection, so the
+     * caller can fall through to another strategy.
+     */
     private fun enterViaKeyboard(): Boolean = try {
         DeckKeyboardService.get()?.let { svc ->
             svc.commitEnter()
@@ -540,21 +707,258 @@ class DeckAccessibilityService : AccessibilityService() {
     }
 
     /** Click a nearby button that looks like send. */
+    /**
+     * Submit by touching the composer's real send control.
+     *
+     * WHAT THE EXPERIMENT SHOWED (this is the root cause)
+     *
+     * On this target, KEYCODE_ENTER does NOT submit. Proven with the privileged
+     * ADB path, which is the strongest form of the test available: typing text
+     * and running `input keyevent 66` left the composer holding
+     * "PROBE_ALPHA&#10;&#10;" -- Enter inserted ANOTHER NEWLINE. The field is a
+     * multi-line chat composer, so a bare Enter is defined as "insert newline"
+     * and the send action lives on a BUTTON. That is why every Enter-based
+     * approach failed, including the correct KEYCODE 66 from the IME: the phone
+     * was never wrong, the assumption was.
+     *
+     * WHAT THE SEND CONTROL LOOKS LIKE
+     *
+     * Found by dumping the tree while the composer was live:
+     *
+     *     x839-922 y1923-2007  ToggleButton  clickable=true  content-desc=""
+     *
+     * An UNNAMED ToggleButton sitting immediately to the RIGHT of the composer
+     * field, sharing its vertical centre, next to a labelled "Attach file"
+     * Button. The missing content-desc is exactly why every label-matching
+     * strategy (send/submit/post) missed it and clicked "pane actions" instead.
+     *
+     * So this locates the control STRUCTURALLY rather than by guesswork:
+     * walk up from the composer, find the clickable node that (a) is not the
+     * composer, (b) overlaps the composer's vertical band, and (c) starts to the
+     * right of the composer's left edge. Among those, prefer the rightmost that
+     * is not the attach button. Then TAP it with dispatchGesture, because a
+     * DOM-painted control does not respond to ACTION_CLICK from its node.
+     */
+    private suspend fun tapSendControl(node: AccessibilityNodeInfo): Boolean {
+        // CRITICAL ORDERING NOTE
+        //
+        // The composer MOVES after the text lands in it. Measured on this device:
+        // the send control was found at y1965, and by the time the tap fired the
+        // composer had scrolled up and the button was at y1231 -- a ~730px jump,
+        // so the tap hit empty screen. Every "the tap did nothing" result traces
+        // back to this.
+        //
+        // So the position is read as late as possible: the text is already in the
+        // composer by the time this is called, and the bounds below are read
+        // fresh here and consumed by the gesture immediately, with no delay or
+        // other work in between.
+        // CRITICAL: read the composer FRESH from the live tree, not from the
+        // `node` handle passed in. That handle is a snapshot taken before the
+        // text was inserted, so its bounds describe where the composer USED to
+        // be. Re-resolving here is what makes the tap follow the reflow.
+        val live = findTargetNode() ?: node
+        val comp = Rect()
+        live.getBoundsInScreen(comp)
+        if (comp.width() <= 0 || comp.height() <= 0) {
+            Log.w(TAG, "tapSendControl: composer has no bounds")
+            return false
+        }
+
+        val target = findSendControl(live, comp)
+        if (target == null) {
+            Log.w(TAG, "tapSendControl: no send control found near composer=$comp")
+            return false
+        }
+        val (fx, fy) = target
+        Log.i(TAG, "tapSendControl: composer=$comp tapping send control at ($fx,$fy)")
+
+        val tapResult = gestureTap(fx, fy)
+        if (!tapResult) {
+            Log.w(TAG, "tapSendControl: gesture refused")
+            return false
+        }
+        return awaitTextCleared(live)
+    }
+
+    /**
+     * Dispatch a single synthetic touch at (x, y) and wait for the callback.
+     *
+     * Returns true when the gesture was accepted, which is a statement about the
+     * touch being delivered -- not about the target having acted on it.
+     */
+    private suspend fun gestureTap(x: Int, y: Int): Boolean {
+        val done = java.util.concurrent.CountDownLatch(1)
+        val path = android.graphics.Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+        val gesture = android.accessibilityservice.GestureDescription.Builder()
+            .addStroke(
+                android.accessibilityservice.GestureDescription.StrokeDescription(path, 0L, 60L)
+            )
+            .build()
+        val ok = dispatchGesture(
+            gesture,
+            object : android.accessibilityservice.AccessibilityService.GestureResultCallback() {
+                override fun onCompleted(d: android.accessibilityservice.GestureDescription?) {
+                    done.countDown()
+                }
+                override fun onCancelled(d: android.accessibilityservice.GestureDescription?) {
+                    done.countDown()
+                }
+            },
+            null
+        )
+        if (!ok) return false
+        done.await(800, java.util.concurrent.TimeUnit.MILLISECONDS)
+        return true
+    }
+
+    /**
+     * Re-read the composer from the live tree and tap its send control.
+     *
+     * Used when the first attempt could not confirm: the page may have scrolled
+     * between discovering the button and touching it, so this re-locates both the
+     * composer and the control in one pass and taps immediately.
+     */
+    private suspend fun tapSendControlRefreshed(): Boolean {
+        val live = findTargetNode() ?: return false
+        val r = Rect()
+        live.getBoundsInScreen(r)
+        if (r.width() <= 0 || r.height() <= 0) return false
+        val t = findSendControl(live, r) ?: return false
+        Log.i(TAG, "tapSendControlRefreshed: composer=$r control=(${t.first},${t.second})")
+
+        val done = java.util.concurrent.CountDownLatch(1)
+        val path = android.graphics.Path().apply { moveTo(t.first.toFloat(), t.second.toFloat()) }
+        val gesture = android.accessibilityservice.GestureDescription.Builder()
+            .addStroke(
+                android.accessibilityservice.GestureDescription.StrokeDescription(path, 0L, 60L)
+            )
+            .build()
+        val ok = dispatchGesture(
+            gesture,
+            object : android.accessibilityservice.AccessibilityService.GestureResultCallback() {
+                override fun onCompleted(d: android.accessibilityservice.GestureDescription?) {
+                    done.countDown()
+                }
+                override fun onCancelled(d: android.accessibilityservice.GestureDescription?) {
+                    done.countDown()
+                }
+            },
+            null
+        )
+        if (!ok) return false
+        done.await(800, java.util.concurrent.TimeUnit.MILLISECONDS)
+        return awaitTextCleared(live)
+    }
+
+    /**
+     * Find the send control's screen centre, structurally.
+     *
+     * Returns null when nothing plausible is adjacent, so the caller can fall
+     * through rather than tap a random spot.
+     *
+     * The candidate must:
+     *   - be clickable and not be the composer itself or its ancestor,
+     *   - overlap the composer's vertical band (it is a sibling on the same row),
+     *   - lie at or after the composer's horizontal centre, and
+     *   - be a plausible control size (not a full-width container).
+     *
+     * Among the survivors the RIGHTMOST wins, and a node whose label mentions
+     * "attach" is skipped: on this UI the send control is the last element on the
+     * row, immediately after the attach button.
+     */
+    private fun findSendControl(
+        composer: AccessibilityNodeInfo,
+        comp: Rect,
+    ): Pair<Int, Int>? {
+        val best = mutableListOf<Triple<Int, Int, Int>>()   // (x, y, rightEdge)
+
+        fun consider(n: AccessibilityNodeInfo) {
+            if (n == composer) return
+            if (n.isClickable) {
+                val r = Rect()
+                n.getBoundsInScreen(r)
+                // Require SUBSTANTIAL vertical overlap, not merely touching.
+                //
+                // A "touching" test (r.top < comp.bottom && r.bottom > comp.top)
+                // let the TOOLBAR row above the composer qualify whenever the
+                // composer's top edge drifted, and a toolbar button was then
+                // tapped instead of send. Measuring how much of the candidate
+                // actually sits inside the composer's band removes that class of
+                // near-miss: a real sibling shares most of the band, a control on
+                // the row above shares only its last few pixels.
+                val overlap = minOf(r.bottom, comp.bottom) - maxOf(r.top, comp.top)
+                val vOverlap = overlap > r.height() / 2
+                val inRow = r.centerX() >= comp.centerX() - comp.width() / 4
+                val controlSized = r.width() in 1..(comp.width())
+                val label = ((n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")).lowercase()
+                val isAttach = label.contains("attach") || label.contains("file")
+                if (vOverlap && inRow && controlSized && !isAttach) {
+                    best.add(Triple(r.centerX(), r.centerY(), r.right))
+                    Log.i(
+                        TAG,
+                        "sendControl candidate: $r overlap=$overlap label='${label.trim().take(30)}' cls=${n.className}"
+                    )
+                }
+            }
+            for (i in 0 until n.childCount) {
+                n.getChild(i)?.let { consider(it) }
+            }
+        }
+
+        (composer.parent ?: return null).let { consider(it) }
+
+        val winner = best.maxByOrNull { it.third } ?: return null
+        sendControlSeen = true
+        return winner.first to winner.second
+    }
+
     private fun clickSendButton(node: AccessibilityNodeInfo): Boolean {
-        // Search upward a couple of levels for a send/submit control.
+        // Search upward for a send/submit control.
+        //
+        // Icon-only buttons carry NO text, so a label match alone misses Discord
+        // and Collie, whose send controls are a paper-plane glyph with a
+        // contentDescription or nothing at all. So this matches on three signals:
+        //   1. a text/contentDescription containing send/submit/post
+        //   2. a clickable node that is a SIBLING of the composer and sits to its
+        //      RIGHT (the conventional position for send in a chat composer)
+        //   3. a clickable node whose view-id hints at send
+        val composerBounds = Rect()
+        node.getBoundsInScreen(composerBounds)
+
         var container: AccessibilityNodeInfo? = node.parent
         var depth = 0
-        while (container != null && depth < 4) {
+        while (container != null && depth < 5) {
             for (i in 0 until container.childCount) {
                 val sib = container.getChild(i) ?: continue
-                if (!sib.isClickable) continue
+                if (sib == node || !sib.isClickable) continue
+
                 val label = buildString {
                     append(sib.text ?: "")
                     append(' ')
                     append(sib.contentDescription ?: "")
+                    append(' ')
+                    append(sib.viewIdResourceName ?: "")
                 }.lowercase()
-                if (label.contains("send") || label.contains("submit")) {
-                    if (sib.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+
+                val looksLikeSend =
+                    label.contains("send") ||
+                    label.contains("submit") ||
+                    label.contains("post") ||
+                    label.contains("send_button") ||
+                    label.contains("sendbutton")
+
+                // Right-of-composer heuristic: only for small controls, so we do
+                // not click a giant container that happens to be clickable.
+                val b = Rect()
+                sib.getBoundsInScreen(b)
+                val smallEnough = b.width() in 1..(composerBounds.width() * 3 / 4)
+                val toTheRight = b.left >= composerBounds.right - composerBounds.width() / 4
+
+                if (looksLikeSend || (smallEnough && toTheRight)) {
+                    if (sib.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                        Log.i(TAG, "clicked send control (label='${label.trim().take(40)}')")
+                        return true
+                    }
                 }
             }
             container = container.parent
