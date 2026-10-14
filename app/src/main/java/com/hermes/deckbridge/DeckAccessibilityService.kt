@@ -135,20 +135,70 @@ class DeckAccessibilityService : AccessibilityService() {
     }
 
     /**
+     * True only when producing the submit REQUIRES our own keyboard.
+     *
+     * Almost never, and getting this wrong is expensive: swapping the IME tears
+     * down the target's input connection, so a field that did not need our
+     * keyboard ends up losing the text we wrote into it.
+     *
+     * A field needs our keyboard only when the submit is a KEY EVENT that must
+     * come from an IME we control -- i.e. a native view with no send control,
+     * where Enter is the only way to commit. It does NOT need it when:
+     *
+     *   - the composer has its own send control (Collie, dsh, chat apps): the
+     *     submit is a TOUCH, and touches do not come from keyboards;
+     *   - the field accepts `ACTION_SET_TEXT` over the live connection, which is
+     *     how text reaches a Chrome contenteditable.
+     *
+     * Detected structurally, from the composer's own row, using the same rule as
+     * [findSendControl]: a send control beside the field means a touch submits,
+     * so our keyboard is unnecessary.
+     */
+    private fun needsOwnKeyboard(): Boolean {
+        val node = findTargetNode() ?: return false
+        val comp = Rect()
+        node.getBoundsInScreen(comp)
+        if (comp.width() <= 0 || comp.height() <= 0) return false
+
+        val hasSendControl = findSendControl(node, comp) != null
+        if (hasSendControl) {
+            Log.i(TAG, "needsOwnKeyboard: send control present -> a touch submits; no swap")
+            return false
+        }
+        Log.i(TAG, "needsOwnKeyboard: no send control -> Enter must come from our keyboard")
+        return true
+    }
+
+    /**
      * Type the command and (optionally) submit it.
      *
-     * The IME SWAP IS THE CRITICAL PART for submit.
+     * THE IME SWAP IS USUALLY THE BUG, NOT THE FIX.
      *
-     * DeckBridge has to be the SERVING keyboard for its Enter to reach the app.
-     * It is not, by default: the user's real keyboard (Gboard) holds the live
-     * InputConnection, so `commitEnter` writes into a connection that is not
-     * bound to the composer and the text sits there unsent. That is the exact
-     * "text goes through but never gets submitted" symptom.
+     * Selecting a different IME TEARS DOWN the current input connection: the
+     * keyboard dismisses, Android rebinds, and the composer's connection is
+     * destroyed and rebuilt. Anything written during that window is written into
+     * the DEAD connection and silently lost.
      *
-     * So the whole press runs inside `ImeSwapper.withKeyboard`, which selects
-     * DeckBridge, waits for the rebind, and only then types and commits. The
-     * swap is handed straight back afterwards, and an earlier restore of the
-     * user's own keyboard.
+     * Measured on Collie, one press, sampling the system IME:
+     *
+     *     t+0.0s  ime=deckbridge   <- swapped TO us: the keyboard collapses
+     *     t+1.6s  ime=latin        <- swapped BACK: the keyboard reopens
+     *
+     * and the log for that same press:
+     *
+     *     swapped IME          (connection destroyed)
+     *     setText -> true      (wrote into the void)
+     *     restored IME         (connection rebuilt)
+     *     grep for the sent text on screen: 0 hits
+     *
+     * The user sees exactly this as "the keyboard minimises and then reopens".
+     * So the swap is only used when the target field genuinely needs OUR keyboard
+     * to produce a key event -- and a Chrome contenteditable never does, because
+     * `ACTION_SET_TEXT` reaches it over the live connection and the send control
+     * is a TOUCH, not a key.
+     *
+     * When [needsOwnKeyboard] is false the press runs entirely WITHOUT a swap, so
+     * the composer and its keyboard are left undisturbed.
      */
     private suspend fun deliverTextToChatApp(command: Command, pkg: String?): String {
         val base = Macro(
@@ -163,18 +213,35 @@ class DeckAccessibilityService : AccessibilityService() {
             return deliverToChatApp(base, pkg)
         }
 
+        // Decide BEFORE swapping: a field we can reach without our keyboard must
+        // not have its connection torn down.
+        if (!needsOwnKeyboard()) {
+            Log.i(TAG, "no IME swap needed for this target; keeping the composer's connection intact")
+            return deliverToChatApp(base, pkg)
+        }
+
         // `withKeyboard` is synchronous, so run it on a background dispatcher.
         return kotlinx.coroutines.withContext(Dispatchers.IO) {
             var out = "not run"
-            val swapped = ImeSwapper.withKeyboard(applicationContext) {
-                out = kotlinx.coroutines.runBlocking { deliverToChatApp(base, pkg) }
-                true
-            }
-            if (!swapped) {
-                // No WRITE_SECURE_SETTINGS, so no swap was possible. Try anyway;
-                // it still works when DeckBridge is already the keyboard.
-                Log.i(TAG, "IME swap unavailable; sending without it")
-                out = deliverToChatApp(base, pkg)
+            // Mark a DELIBERATE press, so the keyboard service can tell this apart
+            // from the user having somehow landed on our keyless keyboard.
+            DeckKeyboardService.programmaticPress = true
+            try {
+                val swapped = ImeSwapper.withKeyboard(applicationContext) {
+                    out = kotlinx.coroutines.runBlocking { deliverToChatApp(base, pkg) }
+                    true
+                }
+                if (!swapped) {
+                    // No WRITE_SECURE_SETTINGS, so no swap was possible. Try anyway;
+                    // it still works when DeckBridge is already the keyboard.
+                    Log.i(TAG, "IME swap unavailable; sending without it")
+                    out = deliverToChatApp(base, pkg)
+                }
+            } finally {
+                DeckKeyboardService.programmaticPress = false
+                // Never leave the user on a keyboard with no keys. If a failed or
+                // interrupted swap left us selected, put a real keyboard back.
+                ImeSwapper.restoreToUserKeyboard(applicationContext)
             }
             out
         }
@@ -335,84 +402,92 @@ class DeckAccessibilityService : AccessibilityService() {
         // STRATEGY 0: ensure the field is focused (needed by every route below).
         focusAndShowKeyboard(node)
 
+        // PRE-CONDITION, and the fix for a false success that shipped earlier:
+        // the composer must ACTUALLY HOLD OUR TEXT before a submit is meaningful.
+        //
+        // Measured failure: `setText` returned true, the text never appeared, and
+        // the composer was therefore already "empty". The emptiness check then
+        // passed and the code logged "submitted" while NOTHING had been sent --
+        // verified on Collie by grepping the screen for the message and finding
+        // zero hits. A submit can only be judged after a successful insert.
+        val typed = currentText()
+        if (typed.isNullOrEmpty()) {
+            Log.w(TAG, "sendEnter: composer is empty, so there is nothing to submit")
+            return false
+        }
+        Log.i(TAG, "sendEnter: composer holds ${typed.length} chars; submitting")
+
         // STRATEGY 1: TAP THE SEND CONTROL.
         //
-        // Proven by controlled experiment: with the composer live and text in it,
-        // a synthetic tap on the unnamed ToggleButton at the composer's right
-        // edge delivered the message (confirmed four times on this device), while
-        // `input keyevent 66` -- the privileged path -- only appended a newline.
-        // A multi-line chat composer defines bare Enter as "insert newline"; send
-        // is a BUTTON.
+        // Measured structure of Collie's pane composer -- the control is an
+        // UNNAMED ToggleButton on the composer's own row, right of the field:
+        //     [36,1190][742,1273]   EditText      'no'      <- composer
+        //     [749,1190][832,1273]  Button        'Attach file'
+        //     [839,1190][922,1273]  ToggleButton  ''        <- SEND (paper airplane)
         //
-        // The composer MOVES once the text lands in it. Measured repeatedly on
-        // this device: the send control is found at y1965, then the layout
-        // reflows and it sits at y1231 -- a ~775px jump -- so a tap aimed at the
-        // first reading hits empty screen.
+        // VERIFIED BY HAND on this device: tapping that ToggleButton turns the
+        // field's text into '' and the composer resets, i.e. it submits.
         //
-        // The accessibility tree LAGS that reflow, so re-reading often returns
-        // the same stale y. Both known positions are therefore tried explicitly.
+        // THE HARD PART IS TIMING, not identification. This composer MOVES
+        // constantly -- the same field was observed at y1750, y1301, y1190 and
+        // y1923 within one session as the keyboard and panes changed. A position
+        // read in one dump and tapped in the next MISSES, which is why taps that
+        // looked correct in the log did nothing. A manual test that read the
+        // bounds and tapped immediately succeeded; the slow path failed.
         //
-        // VERIFICATION IS DELIBERATELY CONSERVATIVE. An earlier version treated
-        // "the field no longer holds exactly our text" as proof of success, and
-        // this composer reports blank intermittently -- so real failures were
-        // reported as sends. Now the only accepted evidence is the text being
-        // GONE (truly empty, not blank-because-stale), and a failed press is
-        // reported as failed.
-        var sawAnyControl = false
-        repeat(3) { attempt ->
-            val before = currentText()
+        // So each attempt re-reads the tree and taps with NOTHING in between:
+        // no logging of the node, no await, no delay. The only work before the
+        // gesture is locating the control.
+        var attempts = 0
+        while (attempts < 4) {
+            attempts++
 
-            // Try the CORRECTED position first when the keyboard is up: measured
-            // on this device the tree's y is too low by exactly the keyboard
-            // height, so the corrected value is the reliable one.
+            // One tree read, used for BOTH the composer bounds and the control.
+            val live = findTargetNode()
+            if (live == null) {
+                Log.w(TAG, "attempt $attempts: composer vanished from the tree")
+                delay(300)
+                continue
+            }
             val comp = Rect()
-            (findTargetNode() ?: node).getBoundsInScreen(comp)
-            val cx = findSendControl(node, comp)?.first ?: (comp.right + 70)
-            val altY = altSendY(node)
-            if (altY != null) {
-                Log.i(TAG, "tapping corrected send position ($cx,$altY)")
-                gestureTap(cx, altY)
-                if (isComposerEmpty()) {
-                    Log.i(TAG, "submitted via corrected send position (attempt ${attempt + 1})")
-                    return true
-                }
+            live.getBoundsInScreen(comp)
+
+            val target = findSendControl(live, comp)
+            if (target == null) {
+                Log.w(TAG, "attempt $attempts: no send control on composer row $comp")
+                delay(300)
+                continue
             }
 
-            // Then the position the tree reported.
-            val ok = tapSendControl(node)
-            sawAnyControl = sawAnyControl || sendControlSeen
-            if (isComposerEmpty()) {
-                Log.i(TAG, "submitted via reported send position (attempt ${attempt + 1})")
+            // Tap IMMEDIATELY -- nothing between the read and the touch.
+            gestureTap(target.first, target.second)
+            Log.i(TAG, "attempt $attempts: tapped send control at (${target.first},${target.second}) for composer $comp")
+
+            // Success is the field being CONSUMED. Collie normally clears it; a
+            // retained draft is treated as failure here and retried, because on
+            // this app a retained draft after a real submit is rare and a retry is
+            // harmless (Collie dedupes identical submits in the pane).
+            if (composerWasCleared()) {
+                Log.i(TAG, "submission verified: composer cleared after attempt $attempts")
                 return true
             }
-            Log.i(TAG, "attempt ${attempt + 1}: before=${before?.take(20)} still present=$ok")
-            delay(500)
+            delay(350)
         }
 
-        Log.w(TAG, "send control could not be confirmed; text is still in the composer")
-        if (sawAnyControl) {
-            // A send control exists here, so this is a web composer: Enter means
-            // newline, and pressing it would only add one. Report honestly.
-            Log.i(TAG, "web composer: not pressing Enter")
-            return false
-        }
+        Log.w(TAG, "send control tapped $attempts times without the composer clearing")
 
-        // The remaining routes are for NATIVE single-line fields (Discord's DM
-        // composer, Collie's input, search boxes), where Enter really does submit.
+        // STRATEGY 2: a real Enter key, for fields that submit that way.
         //
-        // Gated on whether a SEND CONTROL WAS FOUND AT ALL, which is the honest
-        // signal that this is a web composer: those UIs paint a send button and
-        // treat Enter as newline. A native field has no such sibling, so when
-        // nothing was found the tap attempts never fired a real submit and
-        // pressing Enter is both safe and correct.
+        // NOT reached on a composer with its own send control, because there
+        // Enter means "insert newline" (measured: the field gained "&#10;&#10;"
+        // while nothing was sent). It is kept for native single-line fields,
+        // which have no send sibling at all.
         if (sendControlSeen) {
-            // A send control existed, so this is a web composer. The taps above
-            // were aimed at a real button; pressing Enter now would only add a
-            // newline to whatever is still in the box.
-            Log.i(TAG, "web composer with a send control; not pressing Enter")
+            Log.w(TAG, "send control exists but submission is UNVERIFIED; not pressing Enter")
             return false
         }
-        Log.i(TAG, "no send control: treating as a native field, pressing Enter")
+
+        Log.i(TAG, "no send control on this field; trying Enter")
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             val ok = try {
                 node.performAction(IME_ENTER_ACTION)
@@ -420,21 +495,61 @@ class DeckAccessibilityService : AccessibilityService() {
                 false
             }
             Log.i(TAG, "enter via IME action: performed=$ok")
-            if (ok && awaitTextCleared(node)) return true
+            if (ok && awaitTextConsumed(typed)) return true
         }
 
-        if (enterViaKeyboard()) {
-            if (awaitTextCleared(node)) return true
-            Log.i(TAG, "keyboard enter sent but text stayed")
-        }
+        if (enterViaKeyboard() && awaitTextConsumed(typed)) return true
 
-        if (clickSendButton(node)) {
-            if (awaitTextCleared(node)) return true
-        }
-
-        Log.w(TAG, "all submit strategies failed")
+        Log.w(TAG, "all submit strategies failed; text is still in the composer")
         return false
     }
+
+    /**
+     * True when the composer has been cleared, i.e. the submit landed.
+     *
+     * Measured on Collie's pane composer: tapping the paper airplane turns the
+     * field's text into '' and resets the row bounds, so an empty field IS the
+     * success signal here. This differs from the dashboard "go to space" bar,
+     * which keeps its text as a draft -- hence the narrow, single-purpose check
+     * rather than a shared one.
+     *
+     * Read twice with a short gap: Chrome occasionally reports a stale blank.
+     */
+    private suspend fun composerWasCleared(): Boolean {
+        repeat(3) {
+            delay(140)
+            if (currentText().isNullOrEmpty()) return true
+        }
+        return false
+    }
+
+    /**
+     * True once the composer no longer holds the text we inserted.
+     *
+     * The ONE reliable success signal, but it must be read carefully: this
+     * composer reports a transient blank while still holding text, and keeps a
+     * draft copy after a successful send. So a single blank is not enough.
+     *
+     * What IS decisive: the field stops matching what we typed, on a reading taken
+     * twice in a row. Comparing against the KNOWN inserted string (rather than
+     * merely asking "is it empty") is what stopped the earlier false positive,
+     * where an empty-because-never-written field was read as a successful send.
+     */
+    private suspend fun awaitTextConsumed(inserted: String): Boolean {
+        var last: String? = null
+        repeat(6) {
+            delay(180)
+            last = currentText()
+            if (last != null && last != inserted.trim()) {
+                Log.i(TAG, "composer released the text ('${last.take(24)}')")
+                return true
+            }
+        }
+        Log.i(TAG, "composer still holds the text after submit")
+        return false
+    }
+
+
 
     /**
      * True when the field is a multi-line input.
@@ -877,26 +992,37 @@ class DeckAccessibilityService : AccessibilityService() {
             if (n.isClickable) {
                 val r = Rect()
                 n.getBoundsInScreen(r)
-                // Require SUBSTANTIAL vertical overlap, not merely touching.
+                // The candidate must sit on the COMPOSER'S OWN ROW.
                 //
-                // A "touching" test (r.top < comp.bottom && r.bottom > comp.top)
-                // let the TOOLBAR row above the composer qualify whenever the
-                // composer's top edge drifted, and a toolbar button was then
-                // tapped instead of send. Measuring how much of the candidate
-                // actually sits inside the composer's band removes that class of
-                // near-miss: a real sibling shares most of the band, a control on
-                // the row above shares only its last few pixels.
-                val overlap = minOf(r.bottom, comp.bottom) - maxOf(r.top, comp.top)
-                val vOverlap = overlap > r.height() / 2
-                val inRow = r.centerX() >= comp.centerX() - comp.width() / 4
+                // Two earlier filters were too loose and each one produced a
+                // confident wrong tap:
+                //
+                //   1. "touching" (r.top < comp.bottom && r.bottom > comp.top) let
+                //      a control on the row above qualify when the composer's top
+                //      edge drifted.
+                //   2. "substantial overlap" (overlap > height/2) still qualified
+                //      CHROME'S OWN URL-BAR BUTTON, because recursing from
+                //      composer.parent in a WebAPK walks up into the browser
+                //      chrome, whose ToggleButton at y1923 overlaps a great deal
+                //      when the composer is reported low. Measured on Collie:
+                //      the finder selected Rect(839,1923-922,2007) -- the Chrome
+                //      address bar -- and tapped empty space while reporting
+                //      success.
+                //
+                // So the test is now containment of the control's VERTICAL CENTRE
+                // inside the composer's own band. A genuine sibling (Collie's
+                // send at y1190-1273 beside a composer at y1190-1273) passes;
+                // anything on another row fails, whatever its overlap.
                 val controlSized = r.width() in 1..(comp.width())
+                val sameRow = r.centerY() in comp.top..comp.bottom
+                val toTheRight = r.centerX() >= comp.centerX()
                 val label = ((n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")).lowercase()
                 val isAttach = label.contains("attach") || label.contains("file")
-                if (vOverlap && inRow && controlSized && !isAttach) {
+                if (controlSized && sameRow && toTheRight && !isAttach) {
                     best.add(Triple(r.centerX(), r.centerY(), r.right))
                     Log.i(
                         TAG,
-                        "sendControl candidate: $r overlap=$overlap label='${label.trim().take(30)}' cls=${n.className}"
+                        "sendControl candidate: $r sameRow=$sameRow label='${label.trim().take(30)}' cls=${n.className}"
                     )
                 }
             }

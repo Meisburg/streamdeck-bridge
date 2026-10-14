@@ -7,6 +7,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.InputConnection
+import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
@@ -36,6 +37,16 @@ class DeckKeyboardService : InputMethodService() {
 
         @Volatile
         private var instance: DeckKeyboardService? = null
+
+        /**
+         * True only while a deck press is deliberately using this keyboard.
+         *
+         * Set around a press so a start that is NOT part of one can be recognised
+         * and undone: this keyboard has no keys, so a user who lands on it cannot
+         * type anywhere.
+         */
+        @Volatile
+        var programmaticPress: Boolean = false
 
         fun isReady(): Boolean = instance?.currentInputConnection != null
 
@@ -194,20 +205,75 @@ class DeckKeyboardService : InputMethodService() {
     override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         Log.i(TAG, "input started for ${info?.packageName ?: "?"}")
-    }
 
-    /**
-     * The keyboard shows nothing: DeckBridge drives it programmatically. A tiny
-     * invisible view keeps the IME alive and satisfies the framework, which
-     * expects an input view to exist.
-     */
-    override fun onCreateInputView(): View {
-        return TextView(this).apply {
-            text = ""
-            height = 1
-            width = 1
+        // FAILSAFE: this keyboard has no keys, so a user who lands on it cannot
+        // type anywhere. If it is ever started OUTSIDE a programmatic press, hand
+        // the keyboard straight back to the user's own IME rather than leaving
+        // them stranded with an invisible keyboard.
+        if (!programmaticPress) {
+            Log.w(TAG, "started without a DeckBridge press; restoring the user's keyboard")
+            ImeSwapper.restoreToUserKeyboard(applicationContext)
         }
     }
 
-    override fun onEvaluateInputViewShown(): Boolean = false
+
+    /**
+     * A SAFETY NET, not a keyboard.
+     *
+     * This IME exists only to hold an InputConnection so text can be committed
+     * programmatically. It is deliberately invisible, which creates a trap: if
+     * the user (or a failed swap) leaves DeckBridge selected, NO keyboard appears
+     * anywhere on the phone and typing is impossible -- from the user's side and
+     * from any tool. Measured on this device: the service was enabled and
+     * selectable while the user reported being "blocked from typing manually.",
+     * and every injection attempt failed for the same reason.
+     *
+     * So this view renders a small, unmistakable row that names the problem and
+     * offers the way out. It is one line tall: invisible enough not to disturb a
+     * programmatic press, visible enough that the user is never stranded without
+     * knowing why.
+     */
+    override fun onCreateInputView(): View {
+        val ctx = this
+        return LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(0xFF202124.toInt())
+            setPadding(24, 16, 24, 16)
+
+            addView(TextView(ctx).apply {
+                text = "DeckBridge keyboard active — no keys by design."
+                setTextColor(0xFFFFFFFF.toInt())
+                textSize = 13f
+            })
+
+            addView(TextView(ctx).apply {
+                text = "  Switch back"
+                setTextColor(0xFF8AB4F8.toInt())
+                textSize = 13f
+                setPadding(16, 0, 0, 0)
+                isClickable = true
+                setOnClickListener {
+                    // Hand the user straight back to a real keyboard. Without this
+                    // the only route out is Android Settings, which is not something
+                    // to make someone discover mid-task.
+                    try {
+                        val imm = getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                        imm?.showInputMethodPicker()
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "could not open the keyboard picker: ${t.message}")
+                    }
+                }
+            })
+        }
+    }
+
+    /**
+     * Report the input view as shown.
+     *
+     * Returning false here (as an earlier version did) meant the framework never
+     * displayed the row above, so a stranded user had NO indication that
+     * DeckBridge was their active keyboard. Truthful here means the warning is
+     * actually visible.
+     */
+    override fun onEvaluateInputViewShown(): Boolean = true
 }

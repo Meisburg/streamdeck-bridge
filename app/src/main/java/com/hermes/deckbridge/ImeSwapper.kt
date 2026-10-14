@@ -129,7 +129,46 @@ object ImeSwapper {
     }
 
     /**
-     * Put the user's own keyboard back.
+     * Hand the keyboard back to a real, usable input method.
+      *
+      * Emergency exit for the case where DeckBridge is (or becomes) the active IME
+      * without a press in flight. This keyboard renders no keys, so a user left on
+      * it cannot type anywhere, on any app -- measured symptom: "I think the
+      * deckbridge keyboard blocks me from manually typing on the phone."
+      *
+      * Picks a keyboard that is NOT ours, preferring the one the user had before.
+      * Never selects ourselves, and never leaves ourselves selected.
+      */
+     fun restoreToUserKeyboard(ctx: Context) {
+         if (!isActive(ctx)) return
+         val fallback = firstRealKeyboard(ctx)
+         if (fallback == null) {
+             Log.w(TAG, "no alternative keyboard found; cannot restore")
+             return
+         }
+         Log.i(TAG, "DeckBridge keyboard is active outside a press; restoring -> $fallback")
+         if (!setIme(ctx, fallback)) {
+             Log.w(TAG, "FAILED to restore a usable keyboard")
+         }
+     }
+
+     /**
+      * The first enabled keyboard that is not ours, or null.
+      *
+      * Reads the enabled list the same way `ime list -s` does, so the value chosen
+      * is guaranteed selectable.
+      */
+     private fun firstRealKeyboard(ctx: Context): String? = try {
+         val imm = ctx.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+         imm?.enabledInputMethodList
+             ?.map { "${it.packageName}/${it.serviceName}" }
+             ?.firstOrNull { it != OUR_IME }
+     } catch (t: Throwable) {
+         Log.w(TAG, "could not enumerate keyboards: ${t.message}")
+         null
+     }
+
+     /** Put the user's own keyboard back.
      *
      * Safe to call at any time and more than once: it only acts when a swap is
      * outstanding, and it clears that flag even if the write fails, so a failure
