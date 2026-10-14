@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="true" />
+
+    <!--
+      Required to run shell commands inside Termux via its RUN_COMMAND API.
+      Termux additionally requires the F-Droid build and
+      "allow-external-apps = true" in ~/.termux/termux.properties; the Play
+      Store build does not declare this permission at all.
+    -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
+    <!-- Keep the process resident so the accessibility binding survives. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!--
+      Lets DeckBridge swap the system input method itself, so it can type
+      visibly into Termux and then hand the keyboard straight back to the user's
+      own keyboard.
+
+      This is a signature|privileged permission, so Android will NOT grant it
+      from a normal install prompt and the app must never assume it is present.
+      Grant it once over adb:
+
+          pm grant com.hermes.deckbridge android.permission.WRITE_SECURE_SETTINGS
+
+      Without it DeckBridge still works: it falls back to Termux's RUN_COMMAND
+      API for terminal delivery, which needs no keyboard swap at all.
+    -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+
+    <queries>
+        <package android:name="com.termux" />
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:label="DeckBridge"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Auto-launch when the Stream Deck is attached. -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/usb_device_filter" />
+        </activity>
+
+        <service
+            android:name=".DeckAccessibilityService"
+            android:exported="true"
+            android:label="DeckBridge typing"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Keeps the process resident so the accessibility binding survives. -->
+        <service
+            android:name=".DeckResidentService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Maintains a USB HID link to a hardware macro pad" />
+        </service>
+
+        <!--
+          Minimal input method. Its only purpose is to give DeckBridge a
+          channel to commit visible text into views that accept keystrokes
+          only from an IME, which is the case for Termux's TerminalView.
+        -->
+        <service
+            android:name=".DeckKeyboardService"
+            android:exported="true"
+            android:label="DeckBridge keyboard"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+          Remote trigger. Lets a command be fired by name from a workstation:
+
+              adb shell am broadcast -a com.hermes.deckbridge.SEND
+                  -n com.hermes.deckbridge/.CommandReceiver
+                  -es command yes
+
+          Deliberately not exported to other apps beyond adb: the receiver is
+          declared with no permission so `am broadcast` works from adb, which is
+          the only intended caller. It sends TEXT into whatever app is focused,
+          which is exactly what the tap grid does, so it grants no new power to
+          anything that already has adb access to this device.
+        -->
+        <receiver
+            android:name=".CommandReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.hermes.deckbridge.SEND" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
