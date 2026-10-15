@@ -8,6 +8,10 @@ Built for people who want one-tap commands without unlocking, hunting for an app
 and typing on a phone keyboard.
 
 <p align="center">
+  <img src="screenshots/app.png" alt="SD Bridge: a 15-key grid of agent commands, three rows of five" width="420">
+</p>
+
+<p align="center">
   <em>15 on-screen keys, mirrored to 15 physical deck keys.</em>
 </p>
 
@@ -18,6 +22,9 @@ and typing on a phone keyboard.
 - **Two surfaces, one set of commands.** A 15-key tap grid in the app (works with
   no hardware at all, from a phone in your pocket), and the same 15 commands bound
   to the physical keys of a USB Stream Deck.
+- **Your labels show up on the deck.** Each physical key is a little LCD, and it
+  displays its own label, so the hardware tells you what each key does instead of
+  you having to remember positions.
 - **Send a prompt, or launch a capability.** A key can send any text, including
   your agent's slash commands or skills. Press a key, and the capability runs. That
   turns the deck into a launcher for the handful of agent actions you actually use,
@@ -26,7 +33,8 @@ and typing on a phone keyboard.
 - **Long-press a key** for Edit / Clear / Send-as-is.
 - **Send confirmation.** After every send the app posts a notification telling you
   what it typed and whether it landed, because the app backgrounds itself to send.
-- **Brightness control** for the deck backlight, to save battery.
+- **Brightness control** for the deck backlight, to save battery. Persisted, so it
+  survives replugs and reboots.
 - **No root.** No ADB required for normal use. No accounts, no network calls, no
   analytics.
 
@@ -51,9 +59,20 @@ Build it yourself; there is no Play Store listing.
 ```bash
 git clone https://github.com/Meisburg/streamdeck-mobile
 cd streamdeck-mobile
-./gradlew assembleDebug
+./build.sh
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
+
+`build.sh` pins JDK 21 by path. If you use plain `./gradlew` instead and your
+machine's default Java is 26 or newer, the build fails with a message that names
+neither Java nor the version problem:
+
+```
+java.lang.IllegalArgumentException: 26.0.2.1
+```
+
+That is the Kotlin Gradle plugin failing to parse a four-part version string. Use
+`./build.sh`, or point `org.gradle.java.home` at a JDK 21 install.
 
 Or open the folder in Android Studio and hit Run.
 
@@ -67,6 +86,11 @@ Or open the folder in Android Studio and hit Run.
 4. Plug in your Stream Deck. Android asks for USB permission: allow it.
 
 That's it. The binding persists across reboots.
+
+> **Do not clear the app's data** (or run `adb shell pm clear`) unless you are
+> prepared to re-do step 3. Android wipes the accessibility grant along with the
+> data, and **nothing** can restore it programmatically: not the app, not ADB.
+> That restriction is deliberate, and it is why the toggle is a manual step.
 
 ---
 
@@ -290,6 +314,15 @@ Honest list, not a wish list.
   need to charge at the same time, use a USB-C hub with PD passthrough.
 - **No `configChanges` on the main activity**, so rotating the phone recreates it.
   Commands are safe; in-memory log lines are not.
+- **If typing stops working, the app tells you.** A resident service watches the
+  accessibility binding and raises a notification with a tap straight into the
+  setting that fixes it. It deliberately does not steal focus to do this: an earlier
+  version did, and it threw you out of Settings faster than you could reach the
+  toggle.
+- **The deck's USB link degrades under load**, so a key press can occasionally go
+  silent until the app re-arms. `Deck setup` has a **Re-arm keys** button, and it
+  also re-arms itself after a period of quiet. If it happens often, the cable is
+  the usual culprit.
 
 ---
 
@@ -302,12 +335,23 @@ app/src/main/java/com/hermes/deckbridge/
   CommandReceiver.kt           ADB/broadcast entry point (UID-guarded)
   DeckAccessibilityService.kt  The core: targeting, typing, submitting
   DeckTransport.kt             USB HID: bring-up, read loop, brightness, re-arm
+  DeckProtocol.kt              The HID protocol itself: reports, key images, wake
+  KeyImage.kt                  Draws each key face as a JPEG for the hardware
   DeckResidentService.kt       Keeps the process alive; hosts the watchdog
+  DeckSettings.kt              Persisted deck settings (brightness, rotation)
   DeckKeyboardService.kt       Optional IME path for terminal apps
   ImeSwapper.kt                Swaps the active IME per press
   BootReceiver.kt              Re-arms on boot and after an update
   SendConfirm.kt               The post-send notification
+  MacroStore.kt                Key-to-action mapping, persisted as JSON
+  UsbProbe.kt                  Diagnostic: reports what the USB stack actually does
 ```
+
+The last two are worth knowing about even if you never touch them. `MacroStore`
+is the mapping layer between a key and its action, stored as editable JSON in the
+app's private directory, which is what makes the deck scriptable from a
+workstation. `UsbProbe` exists because `controlTransfer` calls were timing out at
+exactly the read timeout, and a guess about why would have been wrong.
 
 ---
 
