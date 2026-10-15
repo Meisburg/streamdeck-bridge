@@ -54,8 +54,18 @@ class MainActivity : AppCompatActivity() {
         commands = CommandStore.load(this)
         buildUi()
         DeckResidentService.start(this)
-        requestNotificationPermission()
-        requestBatteryExemption()
+
+        // Permissions are requested from the Deck section, NOT here.
+        //
+        // onCreate used to fire three system dialogs back to back -- foreground
+        // service, notification permission, battery exemption -- before the user
+        // saw a single button. For a tool whose entire doctrine is "don't make
+        // the user think", opening on a wall of OS prompts is the worst possible
+        // first impression, and it repeated on every reinstall.
+        //
+        // These are deck-health concerns anyway, so they belong with the other
+        // deck controls, which are collapsed by default. The grid is now the
+        // first and only thing on screen at launch.
 
         // The deck transport STARTS HERE, because the deck is the point of this
         // app. An earlier revision made it opt-in to dodge a crash -- but that
@@ -474,16 +484,55 @@ class MainActivity : AppCompatActivity() {
      */
     private fun refreshStatus() {
         val svcOk = DeckAccessibilityService.isRunning()
-        statusView.text =
-            if (svcOk) "" else "Typing service is off. Tap here to fix it."
-        statusView.setTextColor(if (svcOk) Color.GRAY else Color.rgb(200, 60, 60))
+        // Notification state needs BOTH checks, which is genuinely non-obvious.
+        //
+        //   areNotificationsEnabled()  -- false when the app is BLOCKED by the
+        //      user, but it returns TRUE for an app that simply never held
+        //      POST_NOTIFICATIONS, because "never asked" and "allowed" are
+        //      indistinguishable to it. Verified on device: with the permission
+        //      revoked, dumpsys showed AppSettings importance=NONE while this
+        //      call still returned true.
+        //   checkSelfPermission()      -- catches the never-granted case, but can
+        //      report stale-granted inside a running process after an external
+        //      revoke.
+        //
+        // Together they cover both, which is why the status line was silent while
+        // confirmations were in fact suppressed.
+        val notifAllowed = androidx.core.app.NotificationManagerCompat
+            .from(this).areNotificationsEnabled()
+        val notifGranted = android.os.Build.VERSION.SDK_INT < 33 ||
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        val notifOk = notifAllowed && notifGranted
+
+        statusView.text = when {
+            !svcOk -> "Typing service is off. Tap here to fix it."
+            !notifOk -> "Notifications are off, so send confirmations stay hidden. Tap to fix."
+            else -> ""
+        }
+        statusView.setTextColor(
+            if (svcOk && notifOk) Color.GRAY else Color.rgb(200, 60, 60)
+        )
         // Make the warning itself the action. The old copy said "tap Enable
         // typing service below", which sent the user hunting for a control
         // buried five buttons deep inside a section labelled "(tap to collapse)".
-        statusView.isClickable = !svcOk
+        statusView.isClickable = !svcOk || !notifOk
         statusView.setOnClickListener {
             if (!DeckAccessibilityService.isRunning()) {
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            } else if (notifGranted &&
+                !androidx.core.app.NotificationManagerCompat.from(this@MainActivity)
+                    .areNotificationsEnabled()
+            ) {
+                // Blocked at the app level: the only fix is the app's own
+                // notification settings, so land the user directly there.
+                startActivity(
+                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                )
+            } else {
+                // Never granted: re-request through the normal permission path.
+                requestNotificationPermission()
             }
         }
     }
@@ -584,6 +633,14 @@ class MainActivity : AppCompatActivity() {
 
         parent.addView(deckButton("Enable typing service") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        })
+        // Keep the app alive in the background, and let send confirmations show.
+        // These live here rather than in onCreate so a fresh launch opens on the
+        // grid instead of three stacked system dialogs. Safe to tap repeatedly:
+        // each is a no-op once granted.
+        parent.addView(deckButton("Allow background + notifications") {
+            requestNotificationPermission()
+            requestBatteryExemption()
         })
         parent.addView(deckButton("Enable DeckBridge keyboard") {
             startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
