@@ -627,7 +627,19 @@ class DeckTransport(private val ctx: Context) {
 
     /** Queue one key image. Returns immediately; writes happen on the worker. */
     fun sendKeyImage(keyIndex: Int, jpeg: ByteArray) {
-        val rotated = KeyImage.rotate180(jpeg)
+        // ROTATION IS SELECTABLE, not hardcoded.
+        //
+        // The 180-degree flip came from a note in this project's own history ("every
+        // model in the image family renders upside down"), and it was carried forward
+        // untested because images had never actually reached the panel -- the writes
+        // were being dropped. The first time a face was seen on real hardware it was
+        // upside down, which means the assumption was wrong for this unit and the
+        // flip was the cause.
+        //
+        // Rather than inverting the constant and re-shipping on the strength of one
+        // photograph, read it from settings so it can be flipped on the device and
+        // confirmed by eye in seconds.
+        val rotated = if (DeckSettings.rotateImages(ctx)) KeyImage.rotate180(jpeg) else jpeg
         DeckProtocol.buildKeyImageReports(keyIndex, rotated).forEachIndexed { i, r ->
             queue.trySend(Op.Write(r, "img$keyIndex/$i"))
         }

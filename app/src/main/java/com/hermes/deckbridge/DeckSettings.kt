@@ -41,8 +41,37 @@ class DeckSettings(private val ctx: Context) {
         }
     }
 
+    /**
+     * Whether key images are rotated 180 degrees before upload.
+     *
+     * Defaults to false. The flip was inherited from a note claiming every deck in
+     * this family renders upside down, and it went unverified because the images
+     * never reached the panel until now -- the writes were being dropped for an
+     * unrelated reason. The first face seen on real hardware was upside down, so the
+     * note does not hold for this unit.
+     */
+    fun rotateImages(): Boolean = runCatching {
+        if (file.exists()) JSONObject(file.readText()).optBoolean("rotateImages", false)
+        else false
+    }.getOrDefault(false)
+
+    fun setRotateImages(on: Boolean) {
+        runCatching {
+            val o = if (file.exists()) JSONObject(file.readText()) else JSONObject()
+            o.put("rotateImages", on)
+            file.writeText(o.toString())
+        }
+    }
+
     companion object {
         const val DEFAULT = 60
+
+        /**
+         * Read whether to rotate key images, without holding a DeckTransport
+         * reference. Used from the transport's own send path, which has only a
+         * Context.
+         */
+        fun rotateImages(ctx: Context): Boolean = DeckSettings(ctx).rotateImages()
 
         /**
          * Read the brightness without holding a DeckTransport reference.
