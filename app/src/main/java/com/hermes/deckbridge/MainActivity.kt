@@ -142,27 +142,56 @@ class MainActivity : AppCompatActivity() {
     // =====================================================================
 
     private fun buildUi() {
+        // Root fills the window so the grid can claim the leftover height rather
+        // than leaving the bottom half empty.
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(12), dp(12), dp(12))
+        }
+
+        // Draw under the status bar so the header is not clipped, but inset the
+        // CONTENT so nothing sits beneath the status bar or the camera cutout.
+        // Without this the brand row ran under the system icons, which is exactly
+        // what the user reported.
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val bars = insets.getInsets(
+                androidx.core.view.WindowInsetsCompat.Type.systemBars() or
+                androidx.core.view.WindowInsetsCompat.Type.displayCutout()
+            )
+            v.setPadding(dp(12) + bars.left, dp(12) + bars.top, dp(12) + bars.right, dp(12) + bars.bottom)
+            insets
         }
 
         // --- brand header ---
-        // The product's own name and mark, so the screen announces what it is.
-        // The mark is the Stream Deck key-grid, drawn from the app's own resource
-        // rather than bundled art: it reads as the hardware without shipping an
-        // Elgato asset.
         root.addView(buildBrandHeader())
 
-        // --- status line: one sentence, present ONLY when something is wrong ---
+        // --- status: a real button, shown only when something needs fixing ---
         statusView = TextView(this).apply {
-            textSize = 12f
-            setPadding(dp(4), 0, dp(4), dp(8))
+            textSize = 13f
+            gravity = android.view.Gravity.CENTER
+            // Padded and backgrounded so it reads as a control. The previous
+            // version was bare 12sp text with a click listener attached, which
+            // looked exactly like a label and gave no sign it could be tapped.
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            visibility = View.GONE
+            isClickable = true
+            isFocusable = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, dp(10)) }
         }
         root.addView(statusView)
 
         // --- the key grid ---
-        gridView = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        // weight = 1 so the grid absorbs whatever vertical space is left, pushing
+        // the deck section and log to the bottom of the screen instead of leaving
+        // the lower half of the phone unused.
+        gridView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+        }
         root.addView(gridView)
 
         // NOTE: there is deliberately no "+ Add command" button.
@@ -178,10 +207,23 @@ class MainActivity : AppCompatActivity() {
         // never compete with the grid, which is the surface that actually works.
         // The header names the current state, not the next action; a label that
         // describes what a tap will do reads as a description of what is.
+        //
+        // Styled as a filled, bordered bar rather than bare text. As plain 13sp
+        // text with a listener attached it gave no hint it could be tapped -- the
+        // user's report was that it "just looks like text".
         deckHeader = TextView(this).apply {
             text = "Deck setup"
-            textSize = 13f
-            setPadding(dp(4), dp(24), dp(4), dp(8))
+            textSize = 14f
+            gravity = android.view.Gravity.CENTER
+            setPadding(dp(12), dp(14), dp(12), dp(14))
+            setBackgroundColor(Color.parseColor("#1F2430"))
+            setTextColor(Color.parseColor("#C7CBD1"))
+            isClickable = true
+            isFocusable = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, dp(8), 0, 0) }
             setOnClickListener { toggleDeckSection() }
         }
         root.addView(deckHeader)
@@ -199,11 +241,20 @@ class MainActivity : AppCompatActivity() {
             textSize = 11f
             typeface = Typeface.MONOSPACE
             setTextIsSelectable(true)
-            setPadding(dp(4), dp(16), dp(4), 0)
+            setPadding(dp(8), dp(12), dp(8), dp(8))
+            setBackgroundColor(Color.parseColor("#141821"))
+            setTextColor(Color.parseColor("#9AA0A6"))
         }
         root.addView(logView)
 
-        setContentView(ScrollView(this).apply { addView(root) })
+        // A plain LinearLayout, not a ScrollView: the whole point of the weight
+        // above is that the grid takes the leftover height and everything fits on
+        // one screen. Wrapping in a ScrollView defeated that, because a scrolling
+        // parent hands its children unbounded height, so the grid could never
+        // stretch and the content ended halfway down the phone. If the deck
+        // section is expanded and it does not fit, the grid shrinks rather than the
+        // page scrolling, which keeps the keys on screen where they belong.
+        setContentView(root)
         renderGrid()
     }
 
@@ -244,30 +295,62 @@ class MainActivity : AppCompatActivity() {
         gridView.removeAllViews()
 
         val (rows, cols) = DeckProtocol.ROWS to DeckProtocol.COLS
+
+        // Square keys, sized from the WIDTH only.
+        //
+        // Two failed attempts bracket this. Sizing from width alone rendered
+        // correct squares but derived the row height from a "reserved for chrome"
+        // estimate; when that estimate was wrong the row clamped the keys into
+        // rectangles (measured 74x51). Filling the row HEIGHT instead stretched them
+        // into 75x167 slabs. The reliable constraint is width -- five keys must fit
+        // across -- so take the side from width, let rows wrap content, and the keys
+        // stay square regardless of what else is on screen.
+        val metrics = resources.displayMetrics
+        val byWidth = (metrics.widthPixels - dp(24)) / cols - dp(7)
+        val side = byWidth.coerceAtLeast(dp(48))
+
+        gridView.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        gridView.gravity = android.view.Gravity.CENTER_HORIZONTAL
+
         for (r in 0 until rows) {
             gridView.addView(TextView(this).apply {
                 text = "Row ${r + 1}"
                 textSize = 11f
                 setAlpha(0.6f)
-                setPadding(dp(6), if (r == 0) dp(2) else dp(10), dp(4), dp(4))
+                setPadding(dp(6), if (r == 0) dp(2) else dp(8), dp(4), dp(2))
             })
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                // WRAP_CONTENT width: the keys are fixed squares, so a full-width
+                // row would leave slack after the fifth key and push the grid
+                // off-centre. Height is WRAP_CONTENT too, so nothing clamps the keys.
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
             for (c in 0 until cols) {
                 val idx = r * cols + c
-                row.addView(buildKeyButton(idx, commands.getOrNull(idx)))
+                row.addView(buildKeyButton(idx, commands.getOrNull(idx), side))
             }
             gridView.addView(row)
         }
     }
 
     /**
-     * The brand header: the key-grid mark, then the product name.
+     * The brand header: the mark, then the product name.
      *
-     * The mark is drawn as a vector (res/drawable/ic_deck_mark.xml), the same
-     * 5x3 layout as the physical deck, so the app announces what it is in the
-     * hardware's own visual language. The wordmark is set in the app's sans face
-     * at a display weight, with tight tracking so the two words read as one unit
-     * rather than two labels.
+     * The mark is the user's own artwork (an ic_deck_mark.png in each density
+     * bucket), with the black background knocked out to transparency so it sits
+     * on any surface. An earlier attempt hand-drew a 5x3 key grid as a vector and
+     * it rendered as three bars, because the path data was wrong -- using the
+     * supplied image is both correct and simpler.
+     *
+     * The wordmark is set in the app's sans face at a display weight, with tight
+     * tracking so the two words read as one unit rather than two labels.
      */
     private fun buildBrandHeader(): View {
         val row = LinearLayout(this).apply {
@@ -321,7 +404,7 @@ class MainActivity : AppCompatActivity() {
      * anyone wants while editing. Making tap safe means the destructive-in-the-
      * moment action (sending something unintended) is no longer one slip away.
      */
-    private fun buildKeyButton(index: Int, cmd: Command?): Button {
+    private fun buildKeyButton(index: Int, cmd: Command?, side: Int): Button {
         val empty = CommandStore.isEmpty(cmd)
         return Button(this).apply {
             text = if (empty) "Empty" else labelOrFallback(cmd!!)
@@ -329,18 +412,17 @@ class MainActivity : AppCompatActivity() {
             isAllCaps = false
             maxLines = 3
 
-            if (empty) {
-                // Empty slots stay visible and tappable so a user who cleared a
-                // key can put something new there. Dimmed so a glance still reads
-                // the grid as mostly-configured.
-                setTextColor(Color.parseColor("#888888"))
-            }
+            // Rounded key face instead of the default button chrome. A stock
+            // Button is a bordered rectangle with a shadow, which reads as a form
+            // control; the deck's keys are matte rounded squares, and matching that
+            // is the whole point of laying the grid out like the hardware.
+            setBackgroundResource(
+                if (empty) R.drawable.key_face_empty else R.drawable.key_face
+            )
+            if (!empty) setTextColor(Color.parseColor("#E8EAED"))
 
-            // Square-ish, sized off the screen width so five fit across. The
-            // height is derived from the same value to keep them square; a fixed
-            // dp height would go rectangular on any other screen width.
-            val side = (resources.displayMetrics.widthPixels - dp(24)) / DeckProtocol.COLS
-            layoutParams = LinearLayout.LayoutParams(0, side - dp(6), 1f).apply {
+            // Exactly `side` on both axes, so every key is a true square.
+            layoutParams = LinearLayout.LayoutParams(side, side).apply {
                 setMargins(dp(3), dp(3), dp(3), dp(3))
             }
 
@@ -627,34 +709,35 @@ class MainActivity : AppCompatActivity() {
             android.content.pm.PackageManager.PERMISSION_GRANTED
         val notifOk = notifAllowed && notifGranted
 
-        statusView.text = when {
+        // Hidden entirely when healthy, so it occupies no space and cannot be
+        // mistaken for decoration. When shown it is a filled, centred, tappable
+        // band -- a real button, not a sentence with a listener attached.
+        val problem = when {
             !svcOk -> "Typing service is off. Tap here to fix it."
             !notifOk -> "Notifications are off, so send confirmations stay hidden. Tap to fix."
-            else -> ""
+            else -> null
         }
-        statusView.setTextColor(
-            if (svcOk && notifOk) Color.GRAY else Color.rgb(200, 60, 60)
-        )
-        // Make the warning itself the action. The old copy said "tap Enable
-        // typing service below", which sent the user hunting for a control
-        // buried five buttons deep inside a section labelled "(tap to collapse)".
-        statusView.isClickable = !svcOk || !notifOk
-        statusView.setOnClickListener {
-            if (!DeckAccessibilityService.isRunning()) {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            } else if (notifGranted &&
-                !androidx.core.app.NotificationManagerCompat.from(this@MainActivity)
-                    .areNotificationsEnabled()
-            ) {
-                // Blocked at the app level: the only fix is the app's own
-                // notification settings, so land the user directly there.
-                startActivity(
-                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                )
-            } else {
-                // Never granted: re-request through the normal permission path.
-                requestNotificationPermission()
+        if (problem == null) {
+            statusView.visibility = View.GONE
+        } else {
+            statusView.visibility = View.VISIBLE
+            statusView.text = problem
+            statusView.setBackgroundColor(Color.parseColor("#8C2F2F"))
+            statusView.setTextColor(Color.WHITE)
+            statusView.setOnClickListener {
+                if (!DeckAccessibilityService.isRunning()) {
+                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                } else if (notifGranted &&
+                    !androidx.core.app.NotificationManagerCompat.from(this@MainActivity)
+                        .areNotificationsEnabled()
+                ) {
+                    startActivity(
+                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                            .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                    )
+                } else {
+                    requestNotificationPermission()
+                }
             }
         }
     }
@@ -753,21 +836,25 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { onClick() }
         }
 
+        // ------------------------------------------------------------------
+        // Only three things here need a normal user's attention. Everything
+        // else is a engineering tool, so it goes behind "Advanced" rather than
+        // sitting in a list the user has to read and rule out one by one.
+        //
+        // The audit that drove this: of eight controls, a user would plausibly
+        // touch three. The other five are diagnostics -- one of them, "Enable
+        // DeckBridge keyboard", is for Termux only and does nothing for Discord
+        // or Collie, so offering it unprompted actively misleads.
+        // ------------------------------------------------------------------
+
         parent.addView(deckButton("Enable typing service") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         })
-        // Keep the app alive in the background, and let send confirmations show.
-        // These live here rather than in onCreate so a fresh launch opens on the
-        // grid instead of three stacked system dialogs. Safe to tap repeatedly:
-        // each is a no-op once granted.
         parent.addView(deckButton("Allow background + notifications") {
             requestNotificationPermission()
             requestBatteryExemption()
         })
-        parent.addView(deckButton("Enable DeckBridge keyboard") {
-            startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-        })
-        parent.addView(deckButton("Test send (into focused app)") {
+        parent.addView(deckButton("Test send to the app in front of me") {
             val svc = DeckAccessibilityService.instance
             if (svc == null) {
                 toast("Typing service is off")
@@ -795,48 +882,55 @@ class MainActivity : AppCompatActivity() {
                 }, 350)
             }
         })
-        parent.addView(deckButton("Redraw key labels") {
-            val t = transport
-            if (t == null) {
-                toast("Deck not started")
-            } else {
-                pushAllKeyImages(t)
-            }
-        })
-        parent.addView(deckButton("Connect deck (starts USB reader)") {
-            startDeckTransport()
-        })
 
-        // Diagnostics are one-time tools, not daily controls. Grouping them
-        // behind a disclosure keeps five rarely-used buttons out of the way of
-        // the two a user actually touches (brightness and typing service).
-        val diagToggle = TextView(this).apply {
-            text = "Diagnostics  ▸"
-            textSize = 12f
-            setAlpha( 0.7f)
-            setPadding(dp(4), dp(16), dp(4), dp(4))
-            minimumHeight = dp(48)
+        // Advanced: rarely needed, and each one says what it is FOR, so the user
+        // never has to guess from the label alone.
+        val advToggle = TextView(this).apply {
+            text = "Advanced  ▸"
+            textSize = 13f
+            gravity = android.view.Gravity.CENTER
+            setPadding(dp(12), dp(14), dp(12), dp(14))
+            setBackgroundColor(Color.parseColor("#1F2430"))
+            setTextColor(Color.parseColor("#9AA0A6"))
+            isClickable = true
+            isFocusable = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, dp(14), 0, 0) }
         }
-        parent.addView(diagToggle)
-        val diagGroup = LinearLayout(this).apply {
+        parent.addView(advToggle)
+
+        val advGroup = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
         }
-        diagGroup.addView(deckButton("Diagnose USB") {
+        advGroup.addView(deckButton("Reconnect the deck") {
+            startDeckTransport()
+        })
+        advGroup.addView(deckButton("Redraw key labels on the deck") {
+            val t = transport
+            if (t == null) toast("Deck not started") else pushAllKeyImages(t)
+        })
+        advGroup.addView(deckButton("DeckBridge keyboard (for Termux only)") {
+            startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+        })
+        advGroup.addView(deckButton("Diagnose USB connection") {
             log("running USB probe...")
             Thread { UsbProbe.run(this@MainActivity) }.start()
         })
-        parent.addView(diagGroup)
-        var diagOpen = false
-        diagToggle.setOnClickListener {
-            diagOpen = !diagOpen
-            diagGroup.visibility = if (diagOpen) View.VISIBLE else View.GONE
-            diagToggle.text = if (diagOpen) "Diagnostics  ▾" else "Diagnostics  ▸"
-            diagToggle.contentDescription =
-                if (diagOpen) "Diagnostics, expanded. Double tap to collapse."
-                else "Diagnostics, collapsed. Double tap to expand."
+        parent.addView(advGroup)
+
+        var advOpen = false
+        advToggle.setOnClickListener {
+            advOpen = !advOpen
+            advGroup.visibility = if (advOpen) View.VISIBLE else View.GONE
+            advToggle.text = if (advOpen) "Advanced  ▾" else "Advanced  ▸"
+            advToggle.contentDescription =
+                if (advOpen) "Advanced, expanded. Double tap to collapse."
+                else "Advanced, collapsed. Double tap to expand."
         }
-        diagToggle.contentDescription = "Diagnostics, collapsed. Double tap to expand."
+        advToggle.contentDescription = "Advanced, collapsed. Double tap to expand."
     }
 
     /**
