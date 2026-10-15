@@ -68,6 +68,15 @@ class MainActivity : AppCompatActivity() {
          * button is then told to allow exactly this many.
          */
         private const val MAX_KEY_LINES = 3
+
+        /**
+         * The word shown on a key holding no command.
+         *
+         * Shared by the screen grid and the physical deck's key images, so the same
+         * idle key cannot read two different things in the two places the user looks
+         * at it.
+         */
+        const val EMPTY_LABEL = "Empty"
     }
 
     /**
@@ -618,13 +627,18 @@ class MainActivity : AppCompatActivity() {
      * A label of "?" is worse than no label: it looks like a rendering bug and
      * gives the user nothing to distinguish two buttons by. A label counts as
      * missing when it is blank or contains no letter or digit.
+     *
+     * EMPTY_LABEL is the single source of truth for the word shown on a key with no
+     * command. The screen and the physical deck both draw this key, and having each
+     * choose its own word made the same idle key read "Empty" under your thumb and
+     * "Untitled" under your finger.
      */
     private fun labelOrFallback(cmd: Command): String {
         val l = cmd.label.trim()
         val usable = l.any { it.isLetterOrDigit() }
         if (usable) return l
         val t = cmd.text.trim()
-        return if (t.isNotEmpty()) t.take(18) else "Untitled"
+        return if (t.isNotEmpty()) t.take(18) else EMPTY_LABEL
     }
 
     /**
@@ -645,7 +659,7 @@ class MainActivity : AppCompatActivity() {
             // would have to be kept in step with the view tree by hand.
             tag = "key$index"
 
-            text = if (empty) "Empty" else labelOrFallback(cmd!!)
+            text = if (empty) EMPTY_LABEL else labelOrFallback(cmd!!)
             // Starting size only. fitLabel() replaces this after layout with the
             // largest size that actually fits the key; the value here is what a
             // layout pass would use if the fitter never ran.
@@ -1115,7 +1129,12 @@ class MainActivity : AppCompatActivity() {
         t.clearAllKeys()
         for (i in 0 until DeckProtocol.KEY_COUNT) {
             val cmd = commands.getOrNull(i)
-            val label = cmd?.label?.ifBlank { null } ?: cmd?.text?.take(18) ?: ""
+            // Same label the screen shows, from the same function. Deriving it twice
+            // is how the two surfaces drift: the screen falls back to the command's
+            // text when a label is missing, and an empty key reads "Empty". Sending a
+            // separately-derived string here meant a key could be named one thing
+            // under your thumb and another under your finger.
+            val label = cmd?.let { labelOrFallback(it) } ?: EMPTY_LABEL
             val jpeg = KeyImage.render(label, i, active = !cmd?.text.isNullOrBlank())
             t.sendKeyImage(i, jpeg)
             Log.i("DeckBridge", "queued key $i label='$label' ${jpeg.size}B")
