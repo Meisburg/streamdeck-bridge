@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import android.util.Log
 
 /**
@@ -67,6 +68,15 @@ class DeckResidentService : Service() {
     private var lastBeat = 0L
 
     /**
+     * Whether the repair notification is currently showing.
+     *
+     * Edges, not levels: the watchdog ticks every four seconds, so posting the
+     * notification on every tick would re-alert constantly and make the banner
+     * meaningless. This tracks the transition into and out of the down state.
+     */
+    private var warnedDown = false
+
+    /**
      * Watch for the accessibility service dying, and make it obvious when it does.
      *
      * WHY here and not in MainActivity: the Activity's poller only runs while the
@@ -97,24 +107,35 @@ class DeckResidentService : Service() {
                     Log.i(TAG, "watchdog: service running=$up")
                 }
                 if (!up) {
-                    // Only interrupt if DeckBridge is not already in front: bringing
-                    // the app forward is the whole point, but doing it while the user
-                    // is already looking at the app would just be a loop.
-                    val fg = foregroundPackage()
-                    if (fg != packageName) {
-                        Log.i(TAG, "typing service down while in $fg -- surfacing the fix")
-                        runCatching {
-                            startActivity(
-                                Intent(this@DeckResidentService, MainActivity::class.java).apply {
-                                    addFlags(
-                                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                                    )
-                                    putExtra(MainActivity.EXTRA_SERVICE_DROPPED, true)
-                                }
-                            )
-                        }
+                    // Never steal focus. The notification is the repair channel.
+                    //
+                    // This used to call startActivity to "surface the fix", guarded
+                    // only by "is DeckBridge already in front?". That guard cannot
+                    // work: foregroundPackage() asks the ACCESSIBILITY SERVICE what is
+                    // in front, and the accessibility service being down is precisely
+                    // why we are here, so it returns "unknown" and the guard passes
+                    // every time. The result was a four-second loop that threw the
+                    // user out of Settings > Accessibility -- the one screen where the
+                    // toggle they needed actually lives -- faster than they could tap
+                    // it. A watchdog that prevents the repair is worse than no
+                    // watchdog.
+                    //
+                    // The service cannot see the foreground app without privileges it
+                    // does not have and should not ask for, so it cannot tell "user is
+                    // busy" from "user is idle". The honest fix is to stop guessing and
+                    // stop interrupting: warn once per outage through the notification,
+                    // which is tappable, persistent, and takes no focus.
+                    if (!warnedDown) {
+                        warnedDown = true
+                        Log.i(TAG, "typing service down -- raising the repair notification")
+                        notifyServiceDown()
                     }
+                } else if (warnedDown) {
+                    // Recovery is worth announcing too: otherwise the banner stays on
+                    // screen after the problem is gone and stops meaning anything.
+                    warnedDown = false
+                    Log.i(TAG, "typing service back up -- clearing the repair notification")
+                    notifyHealthy()
                 }
                 h.postDelayed(this, 4000)
             }
@@ -139,6 +160,44 @@ class DeckResidentService : Service() {
      */
     private fun foregroundPackage(): String =
         DeckAccessibilityService.instance?.foregroundPackage() ?: "unknown"
+
+    /**
+     * The repair notification: the fix, one tap away, without stealing focus.
+     *
+     * Deep-links straight to this app's Accessibility screen rather than to the app
+     * itself. The user's problem is "typing does not work", and the settings screen
+     * is the only place that gets fixed; landing them on the app's own home screen
+     * would just make them hunt for the path they already know.
+     */
+    private fun notifyServiceDown() {
+        val fix = PendingIntent.getActivity(
+            this, 1,
+            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                PendingIntent.FLAG_IMMUTABLE else 0
+        )
+        val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            Notification.Builder(this, CHANNEL_ID)
+        else
+            @Suppress("DEPRECATION") Notification.Builder(this)
+
+        val n = b.setContentTitle("Typing is off")
+            .setContentText("Tap to enable DeckBridge typing")
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentIntent(fix)
+            .setOngoing(true)
+            .setPriority(Notification.PRIORITY_HIGH)
+            .build()
+        runCatching {
+            getSystemService(NotificationManager::class.java).notify(NOTIF_ID, n)
+        }
+    }
+
+    /** Back to the quiet resident banner once typing works again. */
+    private fun notifyHealthy() {
+        val m = getSystemService(NotificationManager::class.java)
+        runCatching { m.notify(NOTIF_ID, buildNotification()) }
+    }
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return

@@ -1085,8 +1085,17 @@ class MainActivity : AppCompatActivity() {
         log("starting deck transport")
         DeckTransport(this).also { t ->
             transport = t
-            t.start()
+            // SUBSCRIBE BEFORE STARTING.
+            //
+            // start() opens the USB interface synchronously and emits
+            // State.Connected as part of that work. Observing afterwards meant the
+            // emission had already happened with nobody listening, and because the
+            // observer's whole job is "the deck appeared, draw the labels", nothing
+            // ever drew them: the key faces stayed blank while the transport itself
+            // looked healthy. Collecting first makes the observer present for the
+            // one event it exists to catch.
             observeDeck(t)
+            t.start()
         }
     }
 
