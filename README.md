@@ -18,6 +18,10 @@ and typing on a phone keyboard.
 - **Two surfaces, one set of commands.** A 15-key tap grid in the app (works with
   no hardware at all, from a phone in your pocket), and the same 15 commands bound
   to the physical keys of a USB Stream Deck.
+- **Send a prompt, or launch a capability.** A key can send any text, including
+  your agent's slash commands or skills. Press a key, and the capability runs. That
+  turns the deck into a launcher for the handful of agent actions you actually use,
+  instead of a text pad.
 - **Tap a key to edit it.** No long-press-to-edit dance, no separate config screen.
 - **Long-press a key** for Edit / Clear / Send-as-is.
 - **Send confirmation.** After every send the app posts a notification telling you

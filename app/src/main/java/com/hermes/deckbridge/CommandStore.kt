@@ -63,29 +63,47 @@ object CommandStore {
     private const val FILE_NAME = "commands.json"
 
     /**
-     * Seed set: the things actually typed at an AI agent most often.
+     * Seed set: what a fresh install starts with.
+     *
+     * Split deliberately into two halves, because the app does two things and the
+     * second one is easy to miss:
+     *
+     *  1. STEERING prompts -- plain words that keep a running agent moving. These
+     *     are universal; they work with any agent.
+     *  2. SKILL / COMMAND examples -- a leading slash, which most agent harnesses
+     *     (Claude Code, and anything else that reads slash commands or skills)
+     *     interprets as "run the named capability". Nothing special is needed to
+     *     support this: the text is typed and submitted like any other entry. It is
+     *     included here so a new user discovers that the keys can launch named
+     *     capabilities, not merely send canned chat.
+     *
+     * The slash examples are illustrative and harness-specific. Edit them to match
+     * whatever your own agent actually answers to; an entry that means nothing to
+     * your harness just types a useless line.
      *
      * These are written as the PLAIN WORDS the user wants to send, not as shell
-     * wrappers. The Termux path wraps them in `sh -c` internally when the target
-     * is TERMUX, and sends them as chat text when the target is DISCORD, so the
-     * same entry works in both without the user editing anything.
+     * wrappers, so the same entry works whether the text lands in a chat box or a
+     * terminal.
      */
     private fun defaults(): List<Command> = listOf(
+        // --- steering: keep the agent moving ---
         Command("yes", "Yes", "yes"),
         Command("no", "No", "no"),
         Command("recommend", "Recommend", "what do you recommend?"),
         Command("status", "Status", "what is the current status?"),
         Command("next", "Next step", "what is the next step?"),
-        Command("explain", "Explain", "explain what you just did in 3 bullets"),
-        Command("tests", "Run tests", "run the tests and show me the failures"),
-        Command("fix", "Fix errors", "fix the errors you just found"),
-        Command("commit", "Commit", "commit this with a good message"),
-        Command("plan", "Plan", "write a short plan before changing code"),
-        Command("review", "Review", "review your own diff for bugs"),
-        Command("simpler", "Simpler", "make this simpler"),
-        Command("stop", "Stop", "stop and wait for me"),
-        Command("retry", "Retry", "that failed, try a different approach"),
         Command("continue", "Continue", "continue"),
+        Command("explain", "Explain", "explain what you just did in 3 bullets"),
+        Command("stop", "Stop", "stop and wait for me"),
+        Command("simpler", "Simpler", "make this simpler"),
+        Command("retry", "Retry", "that failed, try a different approach"),
+        Command("commit", "Commit", "commit this with a good message"),
+
+        // --- skill / command examples: EDIT THESE to match your own agent ---
+        Command("review", "Review", "/review"),
+        Command("plan", "Plan", "/plan"),
+        Command("tests", "Tests", "/test"),
+        Command("handoff", "Handoff", "/handoff"),
     )
 
     private fun file(ctx: Context) = File(ctx.filesDir, FILE_NAME)
