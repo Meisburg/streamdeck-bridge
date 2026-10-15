@@ -40,6 +40,15 @@ import kotlinx.coroutines.launch
  */
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        /**
+         * Set by DeckResidentService when it brings this screen forward because the
+         * typing service died. Used to force the warning to the top of the user's
+         * attention rather than waiting for the next poll.
+         */
+        const val EXTRA_SERVICE_DROPPED = "service_dropped"
+    }
+
     private lateinit var statusView: TextView
     private lateinit var gridView: LinearLayout
     private lateinit var logView: TextView
@@ -119,6 +128,30 @@ class MainActivity : AppCompatActivity() {
             }
         }
         h.postDelayed(tick, 2000)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        maybeHandleDropped(intent)
+    }
+
+    /**
+     * The resident service brought us forward because the typing service died.
+     *
+     * Make the reason unmistakable: toast what happened, then scroll the red repair
+     * band into view. Arriving on a normal-looking screen after an unexplained jump
+     * out of Discord would be worse than not surfacing at all.
+     */
+    private fun maybeHandleDropped(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_SERVICE_DROPPED, false) != true) return
+        intent.removeExtra(EXTRA_SERVICE_DROPPED)
+        refreshStatus()
+        toast("Typing service stopped. Tap the red bar to turn it back on.")
+        statusView.post {
+            runCatching {
+                (statusView.parent as? ScrollView)?.smoothScrollTo(0, 0)
+            }
+        }
     }
 
     override fun onPause() {
