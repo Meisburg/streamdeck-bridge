@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The Elgato brand blue-violet, matching the app icon's own gradient base. -->
+<!-- Icon backdrop. An indigo-to-violet gradient, chosen to sit well behind the
+     light bridge mark without competing with it. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
     <gradient android:startColor="#3B5BDB" android:endColor="#7048E8"
         android:angle="315" />

@@ -198,10 +198,15 @@ app/src/main/java/com/hermes/deckbridge/
 
 MIT. See [LICENSE](LICENSE).
 
-## A note on the icon
+## Icon and trademark
 
-The launcher icon is derived from Elgato's Stream Deck application icon and is
-included for personal use. **If you fork this for your own public release, replace
-it with your own artwork.** "Stream Deck" and the Stream Deck logo are Elgato
-trademarks, and this project is not affiliated with or endorsed by Elgato. The
-icon is not covered by the MIT license above.
+The icon is an original mark: a bridge span over five key-lights, drawn for this
+project. It is yours to keep or replace under the MIT license.
+
+This project is **not affiliated with, endorsed by, or sponsored by Elgato.** "Elgato"
+and "Stream Deck" are trademarks of Elgato Systems, and they are used here only to
+say what hardware this works with, which is normal and permitted. No Elgato artwork
+is included in this repository.
+
+If you fork this, you can rename and re-icon it freely; nothing in the code depends
+on the name or the mark.
