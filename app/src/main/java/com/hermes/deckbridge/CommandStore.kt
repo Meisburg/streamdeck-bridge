@@ -63,47 +63,46 @@ object CommandStore {
     private const val FILE_NAME = "commands.json"
 
     /**
-     * Seed set: what a fresh install starts with.
+     * Seed set: the deck is laid out as the engineering flow, read left to right,
+     * top to bottom.
      *
-     * Split deliberately into two halves, because the app does two things and the
-     * second one is easy to miss:
+     * The keys are not a menu of unrelated macros. They are the phases of building
+     * a feature, in the order the phases happen, so the physical position of a key
+     * tells you where you are. Row 1 aligns, row 2 builds and ships, row 3 reflects.
+     * The middle three slots of row 3 are deliberately blank: a full grid implies
+     * the flow has more steps than it does, and empty keys are where the next
+     * command that earns a place will go.
      *
-     *  1. STEERING prompts -- plain words that keep a running agent moving. These
-     *     are universal; they work with any agent.
-     *  2. SKILL / COMMAND examples -- a leading slash, which most agent harnesses
-     *     (Claude Code, and anything else that reads slash commands or skills)
-     *     interprets as "run the named capability". Nothing special is needed to
-     *     support this: the text is typed and submitted like any other entry. It is
-     *     included here so a new user discovers that the keys can launch named
-     *     capabilities, not merely send canned chat.
+     * Alignment with Matt Pocock's skills repo (github.com/mattpocock/skills). The
+     * order below matches ask-matt's own recommended flow, as does the phase
+     * grouping -- ask-matt, grill-with-docs, to-spec and to-tickets are one
+     * continuous context window, which is why they are the four keys of row 1
+     * rather than spread across rows.
      *
-     * The slash examples are illustrative and harness-specific. Edit them to match
-     * whatever your own agent actually answers to; an entry that means nothing to
-     * your harness just types a useless line.
+     * The slash names are harness-specific: each one must match a skill the target
+     * agent actually has installed, or the key just types a dead line. Edit them to
+     * match your own agent.
      *
-     * These are written as the PLAIN WORDS the user wants to send, not as shell
-     * wrappers, so the same entry works whether the text lands in a chat box or a
-     * terminal.
+     * Entries are the PLAIN WORDS to send, never shell wrappers, so the same key
+     * works whether the text lands in a chat box or a terminal.
      */
     private fun defaults(): List<Command> = listOf(
-        // --- steering: keep the agent moving ---
-        Command("yes", "Yes", "yes"),
-        Command("no", "No", "no"),
+        // --- Row 1: align on what to build (one unbroken context window) ---
         Command("recommend", "Recommend", "what do you recommend?"),
-        Command("status", "Status", "what is the current status?"),
-        Command("next", "Next step", "what is the next step?"),
-        Command("continue", "Continue", "continue"),
-        Command("explain", "Explain", "explain what you just did in 3 bullets"),
-        Command("stop", "Stop", "stop and wait for me"),
-        Command("simpler", "Simpler", "make this simpler"),
-        Command("retry", "Retry", "that failed, try a different approach"),
-        Command("commit", "Commit", "commit this with a good message"),
+        Command("approved", "Approved", "approved"),
+        Command("explain", "Explain", "explain as simply and succinctly as possible"),
+        Command("askmatt", "Ask Matt", "/ask-matt"),
+        Command("grill", "Grill", "/grill-with-docs"),
 
-        // --- skill / command examples: EDIT THESE to match your own agent ---
-        Command("review", "Review", "/review"),
-        Command("plan", "Plan", "/plan"),
-        Command("tests", "Tests", "/test"),
-        Command("handoff", "Handoff", "/handoff"),
+        // --- Row 2: spec, ticket, build, review, ship ---
+        Command("tospec", "To spec", "/to-spec"),
+        Command("totickets", "To tickets", "/to-tickets"),
+        Command("implement", "Implement", "/implement-spec"),
+        Command("codereview", "Code review", "/code-review"),
+        Command("pr", "PR", "/pr"),
+
+        // --- Row 3: reflect, then three empty slots ---
+        Command("retro", "Retro", "/retro"),
     )
 
     private fun file(ctx: Context) = File(ctx.filesDir, FILE_NAME)
