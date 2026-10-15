@@ -806,40 +806,34 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ------------------------------------------------------------------
-        // Flat list, no disclosure.
+        // Only controls where the user knows WHEN to press them.
         //
-        // A nested "Advanced" bar was one tap too many for four items, two of
-        // which (reconnect, redraw) are the first things you reach for when the
-        // deck acts up. Everything a user could plausibly need is visible here.
+        // The test applied: could someone describe the situation that makes this
+        // button the right thing to tap? Three failed it and are gone.
         //
-        // The two that are genuinely one-time or irrelevant are still present but
-        // labelled so they cannot mislead: the keyboard one says it is for Termux,
-        // and diagnosing USB is a support tool.
+        //   "Reconnect the deck" / "Redraw key labels on the deck" -- these are
+        //      already automatic. The transport starts on launch and restarts
+        //      itself when the key stream wedges, and editing a key re-pushes the
+        //      faces. A button whose job is already handled on its own is not a
+        //      control, it is a question mark.
+        //   "DeckBridge keyboard (for Termux only)" -- removed. This user does not
+        //      use Termux and the keyboard is inert for Discord and Collie.
+        //   "Diagnose USB connection" -- removed. It writes to the on-screen log
+        //      and tells the user nothing they can act on.
+        //
+        // What remains is one button with an obvious trigger, plus the brightness
+        // slider above it.
         // ------------------------------------------------------------------
 
-        parent.addView(deckButton("Enable typing service") {
+        // Each label names the situation, not just the action. "Enable typing
+        // service" alone assumes the user knows what a typing service is and when
+        // it needs enabling; the bracketed half answers both.
+        parent.addView(deckButton("Enable typing service (if text stops sending)") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         })
-        // One-time: keeps the app alive in the background and lets send
-        // confirmations show. A no-op once granted.
-        parent.addView(deckButton("Allow background + notifications") {
+        parent.addView(deckButton("Allow notifications (so send confirmations show)") {
             requestNotificationPermission()
             requestBatteryExemption()
-        })
-        // The two things to try when the deck stops responding.
-        parent.addView(deckButton("Reconnect the deck") {
-            startDeckTransport()
-        })
-        parent.addView(deckButton("Redraw key labels on the deck") {
-            val t = transport
-            if (t == null) toast("Deck not started") else pushAllKeyImages(t)
-        })
-        parent.addView(deckButton("DeckBridge keyboard (for Termux only)") {
-            startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-        })
-        parent.addView(deckButton("Diagnose USB connection") {
-            log("running USB probe...")
-            Thread { UsbProbe.run(this@MainActivity) }.start()
         })
     }
 
