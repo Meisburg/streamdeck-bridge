@@ -183,13 +183,14 @@ class MainActivity : AppCompatActivity() {
         root.addView(statusView)
 
         // --- the key grid ---
-        // weight = 1 so the grid absorbs whatever vertical space is left, pushing
-        // the deck section and log to the bottom of the screen instead of leaving
-        // the lower half of the phone unused.
+        // No weight. Its height comes from the square keys themselves; the old
+        // weight=1 was a leftover from when the grid was meant to absorb leftover
+        // screen height, which a ScrollView parent cannot provide anyway.
         gridView = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
             )
         }
         root.addView(gridView)
@@ -247,14 +248,22 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(logView)
 
-        // A plain LinearLayout, not a ScrollView: the whole point of the weight
-        // above is that the grid takes the leftover height and everything fits on
-        // one screen. Wrapping in a ScrollView defeated that, because a scrolling
-        // parent hands its children unbounded height, so the grid could never
-        // stretch and the content ended halfway down the phone. If the deck
-        // section is expanded and it does not fit, the grid shrinks rather than the
-        // page scrolling, which keeps the keys on screen where they belong.
-        setContentView(root)
+        // Scrollable root, and the grid does NOT take a weight.
+        //
+        // Earlier the root was a plain LinearLayout with the grid weighted, to
+        // make the keys fill the screen. That worked while the deck section was
+        // collapsed, but expanding it pushed the last two controls past the bottom
+        // with nothing to scroll: they were not merely off-screen, they were gone
+        // from the view tree entirely and unreachable. Content ended at y=2034 on a
+        // 2142px screen.
+        //
+        // A ScrollView is what makes every control reachable regardless of how much
+        // is expanded. The keys stay square because their size comes from the screen
+        // width, not from leftover height, so giving up the weight costs nothing.
+        setContentView(ScrollView(this).apply {
+            addView(root)
+            isFillViewport = true
+        })
         renderGrid()
     }
 
@@ -797,78 +806,41 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ------------------------------------------------------------------
-        // ONE button. That is the whole point.
+        // Flat list, no disclosure.
         //
-        // This section held eight controls. Audited against what a user would
-        // plausibly touch, three survived, and of those three only one is a real
-        // control: the typing service. It is the single thing in this app that can
-        // break, and the single fix when it does.
+        // A nested "Advanced" bar was one tap too many for four items, two of
+        // which (reconnect, redraw) are the first things you reach for when the
+        // deck acts up. Everything a user could plausibly need is visible here.
         //
-        //   "Allow background + notifications" -> moved to Advanced. You tap it
-        //      once, ever; it is a permission errand, not a control.
-        //   "Test send" -> removed. It only worked if the user had already opened
-        //      Discord and focused its text field, so it usually failed and read as
-        //      the app being broken. The real test is pressing a deck key.
+        // The two that are genuinely one-time or irrelevant are still present but
+        // labelled so they cannot mislead: the keyboard one says it is for Termux,
+        // and diagnosing USB is a support tool.
         // ------------------------------------------------------------------
 
         parent.addView(deckButton("Enable typing service") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         })
-
-        // Advanced: one-time setup and engineering tools. Each label says what it
-        // is FOR, so nothing here requires guessing.
-        val advToggle = TextView(this).apply {
-            text = "Advanced  ▸"
-            textSize = 13f
-            gravity = android.view.Gravity.CENTER
-            setPadding(dp(12), dp(14), dp(12), dp(14))
-            setBackgroundColor(Color.parseColor("#1F2430"))
-            setTextColor(Color.parseColor("#9AA0A6"))
-            isClickable = true
-            isFocusable = true
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(0, dp(14), 0, 0) }
-        }
-        parent.addView(advToggle)
-
-        val advGroup = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = View.GONE
-        }
-        // Do this once and forget it: keeps the app alive in the background and
-        // lets send confirmations show. Each is a no-op once granted.
-        advGroup.addView(deckButton("Allow background + notifications") {
+        // One-time: keeps the app alive in the background and lets send
+        // confirmations show. A no-op once granted.
+        parent.addView(deckButton("Allow background + notifications") {
             requestNotificationPermission()
             requestBatteryExemption()
         })
-        advGroup.addView(deckButton("Reconnect the deck") {
+        // The two things to try when the deck stops responding.
+        parent.addView(deckButton("Reconnect the deck") {
             startDeckTransport()
         })
-        advGroup.addView(deckButton("Redraw key labels on the deck") {
+        parent.addView(deckButton("Redraw key labels on the deck") {
             val t = transport
             if (t == null) toast("Deck not started") else pushAllKeyImages(t)
         })
-        advGroup.addView(deckButton("DeckBridge keyboard (for Termux only)") {
+        parent.addView(deckButton("DeckBridge keyboard (for Termux only)") {
             startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
         })
-        advGroup.addView(deckButton("Diagnose USB connection") {
+        parent.addView(deckButton("Diagnose USB connection") {
             log("running USB probe...")
             Thread { UsbProbe.run(this@MainActivity) }.start()
         })
-        parent.addView(advGroup)
-
-        var advOpen = false
-        advToggle.setOnClickListener {
-            advOpen = !advOpen
-            advGroup.visibility = if (advOpen) View.VISIBLE else View.GONE
-            advToggle.text = if (advOpen) "Advanced  ▾" else "Advanced  ▸"
-            advToggle.contentDescription =
-                if (advOpen) "Advanced, expanded. Double tap to collapse."
-                else "Advanced, collapsed. Double tap to expand."
-        }
-        advToggle.contentDescription = "Advanced, collapsed. Double tap to expand."
     }
 
     /**
