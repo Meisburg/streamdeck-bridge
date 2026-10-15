@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The name shown under the launcher icon. "Stream Deck Bridge" rather than
-         "DeckBridge" because the user asked for the product name they know. -->
-    <string name="app_name">Stream Deck Bridge</string>
+    <!--
+      Home-screen label. "SD Bridge" rather than "Stream Deck Bridge": the
+      launcher truncates around 11-12 characters on a Pixel 9 Pro, so the full
+      name ellipsised to "Stream Deck Bri...". The in-app header still says
+      "Stream Deck Bridge" in full, where there is room for it.
+    -->
+    <string name="app_name">SD Bridge</string>
     <string name="a11y_description">Types Stream Deck macro text into the focused app, such as Discord or Collie.</string>
 </resources>
