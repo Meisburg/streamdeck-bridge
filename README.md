@@ -1,11 +1,25 @@
 # SD Bridge (Stream Deck Bridge)
 
+<p align="center">
+  <img src="screenshots/hero.png" alt="A Stream Deck plugged into an Android phone, its keys labelled with agent commands, with the phone running a terminal session" width="320">
+</p>
+
+<p align="center">
+  <em>A physical deck, an Android phone, and a cable. Press a key, and the text lands in your agent.</em>
+</p>
+
+---
+
 Turn an Elgato Stream Deck into a macro pad for your **Android phone**. Press a
 physical deck key, and pre-written text lands in whatever app is focused: a chat
 app, an AI agent, a notes field, anywhere you'd otherwise type.
 
 Built for people who want one-tap commands without unlocking, hunting for an app,
 and typing on a phone keyboard.
+
+---
+
+## What it does
 
 <p align="center">
   <img src="screenshots/app.png" alt="SD Bridge: a 15-key grid of agent commands, three rows of five" width="420">
@@ -14,10 +28,6 @@ and typing on a phone keyboard.
 <p align="center">
   <em>15 on-screen keys, mirrored to 15 physical deck keys.</em>
 </p>
-
----
-
-## What it does
 
 - **Two surfaces, one set of commands.** A 15-key tap grid in the app (works with
   no hardware at all, from a phone in your pocket), and the same 15 commands bound
