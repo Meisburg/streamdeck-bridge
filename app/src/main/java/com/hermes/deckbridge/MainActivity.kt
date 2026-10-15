@@ -47,6 +47,32 @@ class MainActivity : AppCompatActivity() {
          * attention rather than waiting for the next poll.
          */
         const val EXTRA_SERVICE_DROPPED = "service_dropped"
+
+        /**
+         * Ceiling for the auto-fit label search, in sp.
+         *
+         * This is a limit on how far fitLabel() may GROW a short label, not a
+         * target: "OK" will render at this size and long names shrink below it.
+         * Held below the 20f brand header on purpose, so a two-letter key can
+         * never out-shout the app's own name.
+         */
+        private const val WIDEST_KEY_LABEL = 18f
+    }
+
+    /**
+     * A key on the grid, distinct from every other Button only by how it measures
+     * its own text.
+     *
+     * A stock Button reports a minimum width and height derived from its label, so
+     * a long label inflates the button's idea of its own size even though the
+     * layout pins both axes to a fixed square. That mismatch is what makes a fixed
+     * text size ellipsise: the view believes it needs more room than it has.
+     * Declining the minimums lets the label be measured against the square it is
+     * actually given, which is the number fitLabel() needs to be correct.
+     */
+    private class KeyButton(context: android.content.Context) : Button(context) {
+        override fun getMinimumWidth(): Int = 0
+        override fun getMinimumHeight(): Int = 0
     }
 
     private lateinit var statusView: TextView
@@ -380,6 +406,19 @@ class MainActivity : AppCompatActivity() {
             }
             gridView.addView(row)
         }
+
+        // Fit every label to its key once the tree has been laid out. Text size
+        // fitting needs the final pixel width of the key, which only exists after
+        // measurement, so this posts rather than running inline. A layout pass can
+        // happen more than once (rotation, inset changes), hence the removal
+        // first: repeated posts would otherwise stack.
+        gridView.post {
+            val labels = commands.size.coerceAtLeast(rows * cols)
+            for (i in 0 until labels) {
+                val key = gridView.findViewWithTag<Button>("key$i") ?: continue
+                fitLabel(key, side, WIDEST_KEY_LABEL)
+            }
+        }
     }
 
     /**
@@ -422,6 +461,78 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Shrink a key's label until the whole thing fits inside the key.
+     *
+     * A fixed 13f label plus `maxLines` ellipsised anything longer than about a
+     * dozen characters: "Stream Deck Bridge" rendered as "Stream Deck Bri...",
+     * which is worse than small text because it loses the distinguishing part of
+     * the name. Keys are fixed squares sized from screen width, so there is no
+     * room to grow; the only free variable is the text size.
+     *
+     * The floor matters. Below about 8f the label stops being readable at arm's
+     * length, which is the only distance this screen is ever used from, so past
+     * that point truncation is the honest outcome: the label ellipsises on one
+     * line rather than being cut mid-word with no signal that anything is missing.
+     */
+    private fun fitLabel(button: Button, side: Int, widest: Float) {
+        val available = (side - dp(10)).coerceAtLeast(1).toFloat()
+        val paint = button.paint
+
+        // Work in PIXELS, not sp.
+        //
+        // setTextSize(sp) is multiplied by the user's font-scale setting on the way
+        // into Paint, so on a device at 1.3 scale a request for 8f renders at 10.4sp.
+        // Every measurement below must therefore be taken at the size the label will
+        // ACTUALLY render at, or the fit is computed against a size that never
+        // appears. setTextSize takes the raw pixel value, which is what Paint
+        // measures in, so the whole calculation stays in one unit.
+        val floorPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_SP, 8f, resources.displayMetrics
+        )
+        val ceilPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_SP, widest, resources.displayMetrics
+        )
+
+        fun widestWord(px: Float): Float {
+            paint.textSize = px
+            return button.text.toString()
+                .split(' ', '\n')
+                .maxOfOrNull { paint.measureText(it) } ?: 0f
+        }
+
+        // Binary search the largest text size whose widest WORD still fits.
+        //
+        // Measuring the word, not the whole line, is deliberate: maxLines=3 lets
+        // the label wrap at spaces, so the binding constraint is the longest
+        // single word. A long single word with no break in it is the case that
+        // actually overflows, and it is exactly the case this must catch.
+        var lo = floorPx
+        var hi = ceilPx
+        repeat(10) {
+            val mid = (lo + hi) / 2f
+            if (widestWord(mid) <= available) lo = mid else hi = mid
+        }
+
+        // Decide by asking the question outright, not by testing where the search
+        // landed. A first cut compared the result against the floor, but the search
+        // converges to just ABOVE the floor when a word cannot fit at any size, so
+        // an unbreakable 21-character label was declared "fits" and rendered clipped
+        // -- the exact failure this function exists to prevent. Measure at the
+        // floor and let that answer it.
+        val fits = widestWord(floorPx) <= available
+
+        button.textSize = pxToSp(lo)
+        // When it cannot fit, ellipsise on a single line so the readable head of a
+        // long name survives instead of a mid-word hard cut.
+        button.maxLines = if (fits) 3 else 1
+        button.ellipsize = if (fits) null else android.text.TextUtils.TruncateAt.END
+    }
+
+    /** Convert a pixel text size back into the raw sp value setTextSize expects. */
+    private fun pxToSp(px: Float): Float =
+        px / resources.displayMetrics.scaledDensity
+
+    /**
      * A button label that is always worth reading.
      *
      * A label of "?" is worse than no label: it looks like a rendering bug and
@@ -448,8 +559,16 @@ class MainActivity : AppCompatActivity() {
      */
     private fun buildKeyButton(index: Int, cmd: Command?, side: Int): Button {
         val empty = CommandStore.isEmpty(cmd)
-        return Button(this).apply {
+        return KeyButton(this).apply {
+            // Identity for the post-layout label fitter. A tag, not a field on a
+            // parallel list: the grid is rebuilt on every data change, and a list
+            // would have to be kept in step with the view tree by hand.
+            tag = "key$index"
+
             text = if (empty) "Empty" else labelOrFallback(cmd!!)
+            // Starting size only. fitLabel() replaces this after layout with the
+            // largest size that actually fits the key; the value here is what a
+            // layout pass would use if the fitter never ran.
             textSize = if (empty) 12f else 13f
             isAllCaps = false
             maxLines = 3
