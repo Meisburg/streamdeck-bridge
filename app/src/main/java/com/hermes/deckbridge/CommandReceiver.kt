@@ -54,7 +54,13 @@ class CommandReceiver : BroadcastReceiver() {
                 submit = intent.getBooleanExtra("submit", true),
             )
             Log.i(TAG, "inline send: '$inline'")
-            svc.runCommand(cmd) { r -> Log.i(TAG, "inline -> $r") }
+            svc.runCommand(cmd) { r ->
+                Log.i(TAG, "inline -> $r")
+                // The broadcast path is the ADB/scripting route, but it is also
+                // how a send can be driven while the phone is in a pocket, so it
+                // confirms like every other path rather than logging only.
+                SendConfirm.show(ctx, inline.take(24), r.toString())
+            }
             return
         }
 
@@ -71,6 +77,7 @@ class CommandReceiver : BroadcastReceiver() {
         Log.i(TAG, "remote send '${cmd.label}' target=$override")
         svc.runCommand(cmd.copy(target = override)) { r ->
             Log.i(TAG, "remote '${cmd.label}' -> $r")
+            SendConfirm.show(ctx, cmd.label, r.toString())
         }
     }
 

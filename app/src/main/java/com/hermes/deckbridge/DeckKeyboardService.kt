@@ -235,10 +235,15 @@ class DeckKeyboardService : InputMethodService() {
      */
     override fun onCreateInputView(): View {
         val ctx = this
+        // dp helper: every other layout in this app converts, so this row must
+        // too. Raw pixels made the padding 3x tighter than intended on a
+        // high-density screen.
+        val d = resources.displayMetrics.density
+        fun dp(v: Int) = (v * d).toInt()
         return LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(0xFF202124.toInt())
-            setPadding(24, 16, 24, 16)
+            setPadding(dp(24), dp(16), dp(24), dp(16))
 
             addView(TextView(ctx).apply {
                 text = "DeckBridge keyboard active — no keys by design."
@@ -250,7 +255,11 @@ class DeckKeyboardService : InputMethodService() {
                 text = "  Switch back"
                 setTextColor(0xFF8AB4F8.toInt())
                 textSize = 13f
-                setPadding(16, 0, 0, 0)
+                setPadding(dp(16), 0, 0, 0)
+                // A 48dp target: this is the escape hatch back to a real
+                // keyboard, so it must not be a thin strip of text.
+                minimumHeight = dp(48)
+                gravity = android.view.Gravity.CENTER_VERTICAL
                 isClickable = true
                 setOnClickListener {
                     // Hand the user straight back to a real keyboard. Without this

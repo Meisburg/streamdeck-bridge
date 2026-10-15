@@ -16,6 +16,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -43,7 +44,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var gridView: LinearLayout
     private lateinit var logView: TextView
     private lateinit var deckSection: LinearLayout
-    private var deckExpanded = true
+    private lateinit var deckHeader: TextView
+    private var deckExpanded = false
     private var commands: MutableList<Command> = mutableListOf()
     private var transport: DeckTransport? = null
 
@@ -88,9 +90,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private var statusPoller: android.os.Handler? = null
+
     override fun onResume() {
         super.onResume()
         refreshStatus()
+        // Poll while visible. refreshStatus() only ran on resume before, so if
+        // the accessibility service died while the app was in the foreground --
+        // a real risk on this device, which is why requestBatteryExemption()
+        // exists -- the warning never appeared until the user left and returned.
+        // The whole point of that warning is to be seen the moment it is true.
+        val h = android.os.Handler(android.os.Looper.getMainLooper())
+        statusPoller = h
+        val tick = object : Runnable {
+            override fun run() {
+                refreshStatus()
+                h.postDelayed(this, 2000)
+            }
+        }
+        h.postDelayed(tick, 2000)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        statusPoller?.removeCallbacksAndMessages(null)
+        statusPoller = null
     }
 
     override fun onDestroy() {
@@ -133,19 +157,25 @@ class MainActivity : AppCompatActivity() {
         })
 
         // --- deck controls, collapsed by default ---
-        root.addView(TextView(this).apply {
-            text = "Deck setup (tap to collapse)"
-            textSize = 12f
-            setPadding(dp(4), dp(24), dp(4), dp(4))
+        // Default collapsed: by the class comment above, the deck controls must
+        // never compete with the grid, which is the surface that actually works.
+        // The header names the current state, not the next action; a label that
+        // describes what a tap will do reads as a description of what is.
+        deckHeader = TextView(this).apply {
+            text = "Deck setup"
+            textSize = 13f
+            setPadding(dp(4), dp(24), dp(4), dp(8))
             setOnClickListener { toggleDeckSection() }
-        })
+        }
+        root.addView(deckHeader)
 
         deckSection = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            visibility = View.VISIBLE
+            visibility = if (deckExpanded) View.VISIBLE else View.GONE
         }
         buildDeckSection(deckSection)
         root.addView(deckSection)
+        refreshDeckHeader()
 
         // --- log ---
         logView = TextView(this).apply {
@@ -163,6 +193,22 @@ class MainActivity : AppCompatActivity() {
     private fun toggleDeckSection() {
         deckExpanded = !deckExpanded
         deckSection.visibility = if (deckExpanded) View.VISIBLE else View.GONE
+        refreshDeckHeader()
+    }
+
+    /**
+     * The header states the current condition, with a chevron for the affordance.
+     *
+     * The previous label ("Deck setup (tap to collapse)") described the NEXT
+     * action while the section was already open, which users read as a
+     * description of the present. Naming the state costs nothing and removes the
+     * need to work out which way it goes.
+     */
+    private fun refreshDeckHeader() {
+        deckHeader.text = if (deckExpanded) "Deck setup  ▾" else "Deck setup  ▸"
+        deckHeader.contentDescription =
+            if (deckExpanded) "Deck setup, expanded. Double tap to collapse."
+            else "Deck setup, collapsed. Double tap to expand."
     }
 
     /**
@@ -193,8 +239,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * A button label that is always worth reading.
+     *
+     * A label of "?" is worse than no label: it looks like a rendering bug and
+     * gives the user nothing to distinguish two buttons by. A label counts as
+     * missing when it is blank or contains no letter or digit.
+     */
+    private fun labelOrFallback(cmd: Command): String {
+        val l = cmd.label.trim()
+        val usable = l.any { it.isLetterOrDigit() }
+        if (usable) return l
+        val t = cmd.text.trim()
+        return if (t.isNotEmpty()) t.take(18) else "Untitled"
+    }
+
     private fun buildCommandButton(cmd: Command): Button = Button(this).apply {
-        text = cmd.label
+        // Never render a useless label. A stale commands.json carried label:"?"
+        // for two entries, which made "Yes" and "Next step" indistinguishable on
+        // the surface whose whole point is tapping without reading carefully.
+        // Treat blank AND punctuation-only labels as missing; the fallback is the
+        // text the button sends, the same way the deck key faces already do.
+        text = labelOrFallback(cmd)
         textSize = 15f
         isAllCaps = false
         maxLines = 2
@@ -260,6 +326,10 @@ class MainActivity : AppCompatActivity() {
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             svc.runCommand(cmd) { r ->
                 Log.i("DeckBridge", "send '${cmd.label}' -> $r")
+                // Announce the outcome instead of leaving it in logcat only.
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    confirmSent(cmd.label.ifBlank { cmd.text.take(18) }, r.toString())
+                }
             }
         }, 350)
     }
@@ -363,11 +433,28 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    /**
+     * Delete with a confirmation.
+     *
+     * Deleting a command also orphans any deck key bound to its position, so
+     * this used to be silent and irreversible. A confirmation is the cheap fix
+     * for a one-way action; the real undo belongs with a proper Material
+     * snackbar, which this project has no dependency for yet.
+     */
     private fun deleteCommand(cmd: Command) {
-        commands = commands.filterNot { it.id == cmd.id }.toMutableList()
-        CommandStore.save(this, commands)
-        renderGrid()
-        log("deleted '${cmd.label}'")
+        val name = cmd.label.ifBlank { cmd.text.take(18) }
+        AlertDialog.Builder(this)
+            .setTitle("Delete \"$name\"?")
+            .setMessage("This also frees its Stream Deck key.")
+            .setPositiveButton("Delete") { _, _ ->
+                commands = commands.filterNot { it.id == cmd.id }.toMutableList()
+                CommandStore.save(this, commands)
+                renderGrid()
+                log("deleted '$name'")
+                toast("Deleted $name")
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     // =====================================================================
@@ -380,12 +467,34 @@ class MainActivity : AppCompatActivity() {
      * Silence means working. A permanently visible status block trains the user
      * to ignore it, which is the opposite of useful for the one case that
      * matters: the accessibility service having been dropped.
+     *
+     * This is about SERVICE health, not about send outcomes. A send needs its own
+     * confirmation (see confirmSent) because the user cannot see this line while
+     * the app is backgrounded, which is exactly when a send happens.
      */
     private fun refreshStatus() {
         val svcOk = DeckAccessibilityService.isRunning()
         statusView.text =
-            if (svcOk) "" else "Typing service is off. Tap \"Enable typing service\" below."
+            if (svcOk) "" else "Typing service is off. Tap here to fix it."
         statusView.setTextColor(if (svcOk) Color.GRAY else Color.rgb(200, 60, 60))
+        // Make the warning itself the action. The old copy said "tap Enable
+        // typing service below", which sent the user hunting for a control
+        // buried five buttons deep inside a section labelled "(tap to collapse)".
+        statusView.isClickable = !svcOk
+        statusView.setOnClickListener {
+            if (!DeckAccessibilityService.isRunning()) {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+        }
+    }
+
+    /**
+     * Announce a send outcome. Delegates to the shared helper so the tap grid,
+     * the broadcast API and the Test button all confirm identically.
+     */
+    private fun confirmSent(label: String, result: String) {
+        SendConfirm.show(this, label, result)
+        log(if (result.contains("no input field", true)) "Not sent: $label" else "Sent: $label")
     }
 
     // =====================================================================
@@ -420,9 +529,16 @@ class MainActivity : AppCompatActivity() {
         // directly, so there is no preset-vs-arbitrary mismatch to explain.
         // onProgressChanged reports live while dragging for immediate feedback;
         // fromUser guards against firing on programmatic sets.
-        val slider = android.widget.SeekBar(this).apply {
+        val slider = SeekBar(this).apply {
             max = 100
             progress = DeckSettings.brightnessOf(this@MainActivity)
+            // The platform default track is ~18dp tall, well under the 48dp
+            // minimum, so give it a real vertical extent. minHeight alone does
+            // not work on SeekBar; the explicit layoutParams height does.
+            minimumHeight = dp(48)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48)
+            )
         }
         slider.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: android.widget.SeekBar?, value: Int, fromUser: Boolean) {
@@ -445,74 +561,103 @@ class MainActivity : AppCompatActivity() {
         })
         brightnessRow.addView(slider)
         brightnessLabel.text = "Brightness: ${DeckSettings.describe(DeckSettings.brightnessOf(this))}"
+        // TalkBack: a bare SeekBar announces only "slider" with no name and no
+        // associated label, so a screen-reader user cannot tell what it controls.
+        // Set both the accessible name and the live value.
+        slider.contentDescription = brightnessLabel.text
         parent.addView(brightnessRow)
 
-        parent.addView(Button(this).apply {
-            text = "Enable typing service"
+        // One shared builder so every deck control has a real 48dp target.
+        // These buttons previously inherited a short default and one of them
+        // rendered at 32dp, which is the exact control a user reaches for when
+        // the deck is already misbehaving.
+        fun deckButton(label: String, onClick: () -> Unit): Button = Button(this).apply {
+            text = label
             textSize = 13f
             isAllCaps = false
-            setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+            minimumHeight = dp(48)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, dp(4), 0, 0) }
+            setOnClickListener { onClick() }
+        }
+
+        parent.addView(deckButton("Enable typing service") {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         })
-        parent.addView(Button(this).apply {
-            text = "Enable DeckBridge keyboard"
-            textSize = 13f
-            isAllCaps = false
-            setOnClickListener { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
+        parent.addView(deckButton("Enable DeckBridge keyboard") {
+            startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
         })
-        parent.addView(Button(this).apply {
-            text = "Test send (into focused app)"
-            textSize = 13f
-            isAllCaps = false
-            setOnClickListener {
-                val svc = DeckAccessibilityService.instance
-                if (svc == null) {
-                    toast("Typing service is off")
-                } else {
-                    // Send through the same path a deck press uses, so this is
-                    // a real end-to-end check rather than a special case.
-                    moveTaskToBack(true)
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        svc.runCommand(
-                            Command(
-                                id = "test",
-                                label = "test",
-                                text = "deckbridge test",
-                                target = Command.Target.DISCORD,
-                                submit = true,
-                            )
-                        ) { r -> Log.i("DeckBridge", "test send -> $r") }
-                    }, 350)
-                }
+        parent.addView(deckButton("Test send (into focused app)") {
+            val svc = DeckAccessibilityService.instance
+            if (svc == null) {
+                toast("Typing service is off")
+            } else {
+                // Send through the same path a deck press uses, so this is
+                // a real end-to-end check rather than a special case.
+                moveTaskToBack(true)
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    svc.runCommand(
+                        Command(
+                            id = "test",
+                            label = "test",
+                            text = "deckbridge test",
+                            target = Command.Target.DISCORD,
+                            submit = true,
+                        )
+                    ) { r ->
+                        Log.i("DeckBridge", "test send -> $r")
+                        // The one button whose job is proving it works used to
+                        // produce no visible proof. Announce it like a real send.
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            confirmSent("test", r.toString())
+                        }
+                    }
+                }, 350)
             }
         })
-        parent.addView(Button(this).apply {
-            text = "Redraw key labels"
-            textSize = 13f
-            isAllCaps = false
-            setOnClickListener {
-                val t = transport
-                if (t == null) {
-                    toast("Deck not started")
-                } else {
-                    pushAllKeyImages(t)
-                }
+        parent.addView(deckButton("Redraw key labels") {
+            val t = transport
+            if (t == null) {
+                toast("Deck not started")
+            } else {
+                pushAllKeyImages(t)
             }
         })
-        parent.addView(Button(this).apply {
-            text = "Connect deck (starts USB reader)"
-            textSize = 13f
-            isAllCaps = false
-            setOnClickListener { startDeckTransport() }
+        parent.addView(deckButton("Connect deck (starts USB reader)") {
+            startDeckTransport()
         })
-        parent.addView(Button(this).apply {
-            text = "Diagnose USB"
-            textSize = 13f
-            isAllCaps = false
-            setOnClickListener {
-                log("running USB probe...")
-                Thread { UsbProbe.run(this@MainActivity) }.start()
-            }
+
+        // Diagnostics are one-time tools, not daily controls. Grouping them
+        // behind a disclosure keeps five rarely-used buttons out of the way of
+        // the two a user actually touches (brightness and typing service).
+        val diagToggle = TextView(this).apply {
+            text = "Diagnostics  ▸"
+            textSize = 12f
+            setAlpha( 0.7f)
+            setPadding(dp(4), dp(16), dp(4), dp(4))
+            minimumHeight = dp(48)
+        }
+        parent.addView(diagToggle)
+        val diagGroup = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        diagGroup.addView(deckButton("Diagnose USB") {
+            log("running USB probe...")
+            Thread { UsbProbe.run(this@MainActivity) }.start()
         })
+        parent.addView(diagGroup)
+        var diagOpen = false
+        diagToggle.setOnClickListener {
+            diagOpen = !diagOpen
+            diagGroup.visibility = if (diagOpen) View.VISIBLE else View.GONE
+            diagToggle.text = if (diagOpen) "Diagnostics  ▾" else "Diagnostics  ▸"
+            diagToggle.contentDescription =
+                if (diagOpen) "Diagnostics, expanded. Double tap to collapse."
+                else "Diagnostics, collapsed. Double tap to expand."
+        }
+        diagToggle.contentDescription = "Diagnostics, collapsed. Double tap to expand."
     }
 
     /**
