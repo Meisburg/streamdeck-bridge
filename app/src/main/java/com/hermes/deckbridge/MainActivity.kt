@@ -528,9 +528,18 @@ class MainActivity : AppCompatActivity() {
         button.ellipsize = if (fits) null else android.text.TextUtils.TruncateAt.END
     }
 
-    /** Convert a pixel text size back into the raw sp value setTextSize expects. */
+    /**
+     * Convert a pixel text size back into the raw sp value setTextSize expects.
+     *
+     * Uses the same TypedValue path as the forward conversion rather than
+     * DisplayMetrics.scaledDensity, which is deprecated and which the platform
+     * itself no longer reads for this purpose. Round-tripping through one API in
+     * both directions keeps them from drifting apart.
+     */
     private fun pxToSp(px: Float): Float =
-        px / resources.displayMetrics.scaledDensity
+        px / TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_SP, 1f, resources.displayMetrics
+        )
 
     /**
      * A button label that is always worth reading.
