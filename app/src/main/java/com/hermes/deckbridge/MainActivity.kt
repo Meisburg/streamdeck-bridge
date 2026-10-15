@@ -563,55 +563,12 @@ class MainActivity : AppCompatActivity() {
         layout.addView(TextView(this).apply { text = "\nText to send"; textSize = 12f })
         layout.addView(textInput)
 
-        // Target picker, behind a disclosure.
-        //
-        // This used to be a primary field in the dialog, which asked the user a
-        // question they mostly cannot answer: AUTO already routes to whatever has
-        // focus, which is right in nearly every case. Putting it behind a tap keeps
-        // it available for the rare case without making every edit a routing
-        // decision. The user's own framing: it "seems irrelevant."
-        var target = cur.target
-        val targetBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = View.GONE
-        }
-        val targetRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val targetBtns = mutableListOf<Button>()
-        Command.Target.values().forEach { t ->
-            val b = Button(this).apply {
-                text = t.name.lowercase().replaceFirstChar { it.uppercase() }
-                textSize = 11f
-                isAllCaps = false
-                alpha = if (t == target) 1f else 0.45f
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                setOnClickListener {
-                    target = t
-                    targetBtns.forEach { it.alpha = 0.45f }
-                    alpha = 1f
-                }
-            }
-            targetBtns.add(b)
-            targetRow.addView(b)
-        }
-        targetBox.addView(targetRow)
-        targetBox.addView(TextView(this).apply {
-            text = "Sends into whatever text field is focused."
-            textSize = 10f
-            setAlpha(0.7f)
-        })
-
-        layout.addView(Button(this).apply {
-            text = "Advanced"
-            textSize = 12f
-            isAllCaps = false
-            setPadding(0, dp(16), 0, 0)
-            setOnClickListener {
-                val showing = targetBox.visibility == View.VISIBLE
-                targetBox.visibility = if (showing) View.GONE else View.VISIBLE
-                text = if (showing) "Advanced  ▸" else "Advanced  ▾"
-            }
-        })
-        layout.addView(targetBox)
+        // No target picker. It offered AUTO vs Discord, and AUTO already sends to
+        // whatever has focus -- which is correct in every case this user has. So
+        // the picker asked a question with one real answer, and its only effect was
+        // to make a two-field dialog look like a three-decision one. The target
+        // stays on the Command for the broadcast API, which sets it explicitly;
+        // the UI simply does not ask.
 
         var submit = cur.submit
         layout.addView(Button(this).apply {
@@ -633,7 +590,10 @@ class MainActivity : AppCompatActivity() {
                     label = labelInput.text.toString()
                         .ifBlank { textInput.text.toString().take(20) },
                     text = textInput.text.toString(),
-                    target = target,
+                    // Preserve whatever target the slot already had. The dialog no
+                    // longer offers the choice, so overwriting it here would silently
+                    // reset a value the user (or the adb API) deliberately set.
+                    target = cur.target,
                     submit = submit,
                 )
                 // Write back to the SLOT, never append. The grid is a fixed set of
@@ -837,54 +797,26 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ------------------------------------------------------------------
-        // Only three things here need a normal user's attention. Everything
-        // else is a engineering tool, so it goes behind "Advanced" rather than
-        // sitting in a list the user has to read and rule out one by one.
+        // ONE button. That is the whole point.
         //
-        // The audit that drove this: of eight controls, a user would plausibly
-        // touch three. The other five are diagnostics -- one of them, "Enable
-        // DeckBridge keyboard", is for Termux only and does nothing for Discord
-        // or Collie, so offering it unprompted actively misleads.
+        // This section held eight controls. Audited against what a user would
+        // plausibly touch, three survived, and of those three only one is a real
+        // control: the typing service. It is the single thing in this app that can
+        // break, and the single fix when it does.
+        //
+        //   "Allow background + notifications" -> moved to Advanced. You tap it
+        //      once, ever; it is a permission errand, not a control.
+        //   "Test send" -> removed. It only worked if the user had already opened
+        //      Discord and focused its text field, so it usually failed and read as
+        //      the app being broken. The real test is pressing a deck key.
         // ------------------------------------------------------------------
 
         parent.addView(deckButton("Enable typing service") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         })
-        parent.addView(deckButton("Allow background + notifications") {
-            requestNotificationPermission()
-            requestBatteryExemption()
-        })
-        parent.addView(deckButton("Test send to the app in front of me") {
-            val svc = DeckAccessibilityService.instance
-            if (svc == null) {
-                toast("Typing service is off")
-            } else {
-                // Send through the same path a deck press uses, so this is
-                // a real end-to-end check rather than a special case.
-                moveTaskToBack(true)
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    svc.runCommand(
-                        Command(
-                            id = "test",
-                            label = "test",
-                            text = "deckbridge test",
-                            target = Command.Target.DISCORD,
-                            submit = true,
-                        )
-                    ) { r ->
-                        Log.i("DeckBridge", "test send -> $r")
-                        // The one button whose job is proving it works used to
-                        // produce no visible proof. Announce it like a real send.
-                        android.os.Handler(android.os.Looper.getMainLooper()).post {
-                            confirmSent("test", r.toString())
-                        }
-                    }
-                }, 350)
-            }
-        })
 
-        // Advanced: rarely needed, and each one says what it is FOR, so the user
-        // never has to guess from the label alone.
+        // Advanced: one-time setup and engineering tools. Each label says what it
+        // is FOR, so nothing here requires guessing.
         val advToggle = TextView(this).apply {
             text = "Advanced  ▸"
             textSize = 13f
@@ -905,6 +837,12 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
         }
+        // Do this once and forget it: keeps the app alive in the background and
+        // lets send confirmations show. Each is a no-op once granted.
+        advGroup.addView(deckButton("Allow background + notifications") {
+            requestNotificationPermission()
+            requestBatteryExemption()
+        })
         advGroup.addView(deckButton("Reconnect the deck") {
             startDeckTransport()
         })
