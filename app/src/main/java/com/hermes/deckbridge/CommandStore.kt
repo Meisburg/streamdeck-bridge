@@ -101,7 +101,7 @@ object CommandStore {
         Command("codereview", "Code review", "/code-review"),
         Command("pr", "PR", "/pr"),
 
-        // --- Row 3: repair, reflect, then two empty slots ---
+        // --- Row 3: leave the build, then two keys that are not part of the build ---
         // Recovery lives on the row with the other repair key, because both answer
         // "that is not what I wanted" rather than advancing the build.
         //
@@ -111,11 +111,20 @@ object CommandStore {
         // too much. /diagnosing-bugs covers "it is broken"; nothing covered "it
         // worked, and I did not want that."
         Command("undo", "Undo", "undo that last change"),
-        Command("retro", "Retro", "/retro"),
+        // Handoff is the seam BETWEEN sessions: it compacts the conversation so a
+        // fresh agent continues cleanly. The flow above assumes you already have a
+        // task in front of you; this is the key for when you are out of context
+        // window, or getting pulled away mid-task.
+        Command("handoff", "Handoff", "/handoff"),
         // The one branch the flow above has no answer for. A key that covers
         // "something is broken" earns its place more than a third variation on
-        // "build a feature", which is what the empty slots are there to resist.
+        // "build a feature".
         Command("diagnose", "Diagnose", "/diagnosing-bugs"),
+        Command("retro", "Retro", "/retro"),
+        // The only key here that improves the codebase rather than shipping from it.
+        // Its author recommends running it once every few days, which is a standing
+        // cadence -- exactly what a dedicated physical key is for.
+        Command("improve", "Improve", "/improve-codebase-architecture"),
     )
 
     private fun file(ctx: Context) = File(ctx.filesDir, FILE_NAME)
