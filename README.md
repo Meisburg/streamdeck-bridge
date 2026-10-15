@@ -83,6 +83,119 @@ If labels ever go blank after unplugging and replugging, tap **Deck setup** and 
 
 ---
 
+## Chatting with your AI agent from the deck
+
+This is the use case the app was built for, so it is worth spelling out.
+
+The idea: **your agent is a conversation, and a conversation is mostly a handful of things you say over and over.** "What do you recommend?" "Continue." "Explain that more simply." "Undo that." Typing those on a phone keyboard is friction, and friction is what stops you from steering the agent at all. So each one becomes a physical key.
+
+### Why a deck instead of just typing
+
+The agent workflow has a shape. You align on what to build, you break it into work, you build it, you review it, you ship it. That is four or five phases, and while you are *in* a phase you say the same few things: approve, continue, explain, undo.
+
+A key removes the typing, the unlocking, and the app-switching, which matters most in the two situations where you would otherwise not bother:
+
+- You are **away from the desk**, phone in hand, and want to keep a build moving.
+- You are **mid-flow** and the agent just did something you want to redirect.
+
+The deck does not make the agent smarter. It removes the cost of steering it, so you steer it more.
+
+### The one thing to understand first
+
+A key can send **any text**. Plain words, or a slash command.
+
+- Plain words (`approved`, `undo that last change`) are just a message. The agent reads them like anything you typed.
+- A slash command (`/to-spec`, `/handoff`) triggers a named capability in the agent's own harness.
+
+Nothing special is needed to support slash commands. The text is typed and submitted like any other entry. But it is the interesting half: it means a key can launch a *capability*, not just say something.
+
+**A slash key only works if your agent actually has that skill installed.** If it does not, the key types a line the agent cannot interpret, which looks like the key failing. Every slash command below names a skill from [mattpocock/skills](https://github.com/mattpocock/skills); install that set first, or edit the keys to match whatever your agent answers to.
+
+### Setup
+
+Nothing beyond the normal install. Because the app sends to whatever is focused, the sequence is:
+
+1. Open your agent (a chat app, a terminal running a coding agent, a web UI).
+2. Tap its text field so the cursor is in it.
+3. Press a key.
+
+The app never needs to know which agent you use. It types into the focused field and submits.
+
+If your agent runs in a **terminal**, see `DeckKeyboardService` in the repository layout: terminal apps often accept input only from an active IME, so there is an optional keyboard path for that case.
+
+---
+
+## The 15 default commands
+
+The defaults are not a random list of macros. They are **the phases of building a feature, in the order the phases happen**, laid out so the physical position of a key tells you where you are.
+
+Row 1 aligns on what to build. Row 2 specifies, tickets, implements, reviews, ships. Row 3 is the row of things that are *not* part of the build: recover, pause, repair, reflect, improve.
+
+```
+Row 1   Recommend   Approved   Explain     Ask Matt   Grill
+Row 2   To spec     To tickets Implement   Code review  PR
+Row 3   Undo        Handoff    Diagnose    Retro      Improve
+```
+
+Every key is editable. These are a starting point, and the whole point of the app is that you replace them with your own.
+
+### Row 1 — align on what to build
+
+| Key | Sends | What it is for |
+| :--- | :--- | :--- |
+| **Recommend** | `what do you recommend?` | Forces a decision out of the agent instead of a menu. |
+| **Approved** | `approved` | The most-pressed key on the deck. Says yes and moves on. |
+| **Explain** | `explain as simply and succinctly as possible` | Re-pitches something that did not land. |
+| **Ask Matt** | `/ask-matt` | Routes to the right skill in the set below, when you are not sure which one you want. |
+| **Grill** | `/grill-with-docs` | Relentless interview about a plan or design, which also builds the project's glossary and ADRs as it goes. |
+
+`Ask Matt` and `Grill` are the two halves of the same idea: `ask-matt` is the router, and `grill-with-docs` is the one you end up in most often. The point of a grilling session is to close the gap between what you think you asked for and what the agent understood, before any code exists.
+
+### Row 2 — spec, ticket, build, review, ship
+
+| Key | Sends | What it is for |
+| :--- | :--- | :--- |
+| **To spec** | `/to-spec` | Turns the conversation you just had into a written spec. No interview, just synthesis. |
+| **To tickets** | `/to-tickets` | Breaks that spec into tracer-bullet tickets, each declaring what blocks it. |
+| **Implement** | `/implement-spec` | Builds a whole spec, working the tickets as a task graph. |
+| **Code review** | `/code-review` | Two-axis review of the diff: does it follow the repo's standards, and does it match the spec. |
+| **PR** | `/pr` | Shapes the pull request body: the smallest visual that makes the change clear, before/after evidence, and a merge-danger call. |
+
+> **Keep Row 1 in one unbroken context window.** `ask-matt`, `grill-with-docs`, `to-spec` and `to-tickets` are meant to build on the same thinking. Do not compact or clear the conversation between them. That is why those four are the four keys of row 1 rather than spread across rows.
+
+### Row 3 — leave the build
+
+| Key | Sends | What it is for |
+| :--- | :--- | :--- |
+| **Undo** | `undo that last change` | Says "that worked, and I did not want that." Not a `git revert`; it is a message to the agent. |
+| **Handoff** | `/handoff` | Compacts the conversation so a fresh agent can continue. For running out of context, or getting pulled away mid-task. |
+| **Diagnose** | `/diagnosing-bugs` | Disciplined debugging loop for the hard ones: build a loop that goes red on this bug, then fix it. |
+| **Retro** | `/retro` | After a build, suggests changes to the *agent's environment*: navigation, checks, standards, tooling. |
+| **Improve** | `/improve-codebase-architecture` | Surveys the codebase for deepening opportunities. Worth running every few days. |
+
+Every key in rows 1 and 2 ends by *changing something*. Row 3 is the row that can take it back, pause it, repair it, and make the next build start from a better place.
+
+### The skills behind the slash keys
+
+All slash keys come from [mattpocock/skills](https://github.com/mattpocock/skills), a set of small composable engineering skills. Install that set in your agent of choice; the README there covers it. The specific ones this deck uses:
+
+`ask-matt` · `grill-with-docs` · `to-spec` · `to-tickets` · `implement-spec` · `code-review` · `pr` · `handoff` · `diagnosing-bugs` · `retro` · `improve-codebase-architecture`
+
+Two of these are deliberately **not** on the deck: `grilling` and `codebase-design` can be reached for automatically by the agent, so they do not need a physical key.
+
+### Making it yours
+
+The defaults are one workflow. Yours will differ.
+
+Tap any key to edit it. Long-press for **Edit / Clear / Send as-is**. Two fields matter:
+
+- **Button name** — what the key face shows. Keep it short; it auto-sizes to fit, but shorter is more readable at a glance.
+- **Text to send** — the literal text, or the slash command.
+
+If most of your keys end up being plain phrases you type a lot ("looks good, continue", "check that against the spec"), that is the app working as intended.
+
+---
+
 ## The accessibility disclosure
 
 This app asks for an **accessibility service**, which is the same permission
