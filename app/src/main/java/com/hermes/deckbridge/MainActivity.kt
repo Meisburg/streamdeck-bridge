@@ -407,41 +407,45 @@ class MainActivity : AppCompatActivity() {
         // panel-side way to save battery. This row is the user-facing control;
         // the value is persisted and re-applied on every connect and re-arm.
         val brightnessRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+            orientation = LinearLayout.VERTICAL
             setPadding(dp(4), dp(4), dp(4), dp(4))
         }
         val brightnessLabel = TextView(this).apply {
             textSize = 13f
-            setPadding(0, 0, dp(8), 0)
+            setPadding(dp(4), 0, dp(4), dp(4))
         }
         brightnessRow.addView(brightnessLabel)
+
+        // One control, not five. A slider maps the underlying 0..100 value
+        // directly, so there is no preset-vs-arbitrary mismatch to explain.
+        // onProgressChanged reports live while dragging for immediate feedback;
+        // fromUser guards against firing on programmatic sets.
+        val slider = android.widget.SeekBar(this).apply {
+            max = 100
+            progress = DeckSettings.brightnessOf(this@MainActivity)
+        }
+        slider.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: android.widget.SeekBar?, value: Int, fromUser: Boolean) {
+                // Update the label live while dragging, but do NOT push to the
+                // hardware here. A drag fires this callback for every step, so
+                // writing per-step floods the USB queue with ~100 writes for one
+                // gesture. On this flaky link that is worth avoiding. The single
+                // write happens on release.
+                if (fromUser) brightnessLabel.text = "Brightness: ${DeckSettings.describe(value)}"
+            }
+
+            override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
+
+            override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {
+                val v = sb?.progress ?: return
+                brightnessLabel.text = "Brightness: ${DeckSettings.describe(v)}"
+                transport?.setBrightness(v)
+                toast("Deck brightness: $v%")
+            }
+        })
+        brightnessRow.addView(slider)
+        brightnessLabel.text = "Brightness: ${DeckSettings.describe(DeckSettings.brightnessOf(this))}"
         parent.addView(brightnessRow)
-
-        fun refreshBrightnessLabel() {
-            val cur = DeckSettings.brightnessOf(this)
-            val name = DeckSettings.PRESETS.firstOrNull { it.first == cur }?.second
-                ?: "$cur%"
-            brightnessLabel.text = "Brightness: $name ($cur%)"
-        }
-
-        val presetRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-        DeckSettings.PRESETS.forEach { (pct, name) ->
-            presetRow.addView(Button(this).apply {
-                text = name
-                textSize = 12f
-                isAllCaps = false
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                setOnClickListener {
-                    transport?.setBrightness(pct)
-                    refreshBrightnessLabel()
-                    toast("Deck brightness: $name ($pct%)")
-                }
-            })
-        }
-        parent.addView(presetRow)
-        refreshBrightnessLabel()
 
         parent.addView(Button(this).apply {
             text = "Enable typing service"

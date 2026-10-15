@@ -61,5 +61,11 @@ class DeckSettings(private val ctx: Context) {
             60 to "Normal",
             100 to "Bright",
         )
+
+        /** Human label for an arbitrary 0..100 value; exact presets keep their name. */
+        fun describe(percent: Int): String {
+            val named = PRESETS.firstOrNull { it.first == percent }?.second
+            return if (named != null) "$named ($percent%)" else "$percent%"
+        }
     }
 }
