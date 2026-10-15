@@ -21,6 +21,12 @@ android {
         }
     }
 
+    // BuildConfig.DEBUG gates the key-metrics log in MainActivity. AGP 8 stopped
+    // generating BuildConfig by default, so it has to be asked for explicitly.
+    buildFeatures {
+        buildConfig = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

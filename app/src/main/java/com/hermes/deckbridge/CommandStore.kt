@@ -101,8 +101,12 @@ object CommandStore {
         Command("codereview", "Code review", "/code-review"),
         Command("pr", "PR", "/pr"),
 
-        // --- Row 3: reflect, then three empty slots ---
+        // --- Row 3: reflect and recover, then three empty slots ---
         Command("retro", "Retro", "/retro"),
+        // The one branch the flow above has no answer for. A key that covers
+        // "something is broken" earns its place more than a third variation on
+        // "build a feature", which is what the three empty slots are there to resist.
+        Command("diagnose", "Diagnose", "/diagnosing-bugs"),
     )
 
     private fun file(ctx: Context) = File(ctx.filesDir, FILE_NAME)

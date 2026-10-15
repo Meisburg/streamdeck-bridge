@@ -8,6 +8,8 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.InputType
+import android.text.Layout
+import android.text.StaticLayout
 import android.util.Log
 import android.util.TypedValue
 import android.view.View
@@ -57,6 +59,15 @@ class MainActivity : AppCompatActivity() {
          * never out-shout the app's own name.
          */
         private const val WIDEST_KEY_LABEL = 18f
+
+        /**
+         * How many lines a key label may wrap to.
+         *
+         * Also the ceiling the fitter tests against, so the two can never disagree:
+         * the fitter asks whether the text lays out in this many lines, and the
+         * button is then told to allow exactly this many.
+         */
+        private const val MAX_KEY_LINES = 3
     }
 
     /**
@@ -416,8 +427,40 @@ class MainActivity : AppCompatActivity() {
             val labels = commands.size.coerceAtLeast(rows * cols)
             for (i in 0 until labels) {
                 val key = gridView.findViewWithTag<Button>("key$i") ?: continue
-                fitLabel(key, side, WIDEST_KEY_LABEL)
+                fitLabel(key)
             }
+            if (BuildConfig.DEBUG) dumpKeyMetrics()
+        }
+    }
+
+    /**
+     * Log the real geometry of every key so a mis-fit can be proved or disproved
+     * with numbers rather than by squinting at a screenshot.
+     *
+     * The fitter's arithmetic is only as good as the box it is told to fit into,
+     * and that box (width minus padding, for a square whose drawable reserves its
+     * own inset) is not visible from a screenshot or an accessibility dump, both of
+     * which report the node's outer bounds only. Printing side, padding, the usable
+     * width, the measured text width and whether the text overruns turns a
+     * judgement call into a fact.
+     */
+    private fun dumpKeyMetrics() {
+        for (i in 0 until 15) {
+            val key = gridView.findViewWithTag<Button>("key$i") ?: continue
+            val usable = key.width - key.paddingLeft - key.paddingRight
+            val layout = StaticLayout.Builder
+                .obtain(key.text.toString(), 0, key.text.length, key.paint, usable)
+                .setMaxLines(MAX_KEY_LINES)
+                .build()
+            var cut = 0
+            for (line in 0 until layout.lineCount) cut += layout.getEllipsisCount(line)
+            Log.i(
+                "deckfit",
+                "key$i '${key.text}' side=${key.width} usable=$usable" +
+                    " textSize=${"%.1f".format(key.textSize)}" +
+                    " lines=${layout.lineCount} ellipsisChars=$cut" +
+                    " textH=${layout.height} boxH=${key.height}"
+            )
         }
     }
 
@@ -474,9 +517,22 @@ class MainActivity : AppCompatActivity() {
      * that point truncation is the honest outcome: the label ellipsises on one
      * line rather than being cut mid-word with no signal that anything is missing.
      */
-    private fun fitLabel(button: Button, side: Int, widest: Float) {
-        val available = (side - dp(10)).coerceAtLeast(1).toFloat()
+    private fun fitLabel(button: Button) {
+        // Take the width from the view's own content box, not from the key's
+        // nominal size.
+        //
+        // A key's usable text width is not its side length. Anything the button
+        // reserves as padding, and anything the key-face drawable reserves inside
+        // that, comes off the top before a single character is drawn. Deriving the
+        // budget from a laid-out view is the only version of this number that is
+        // true; a caller-supplied `side` is a guess about a box only the view knows.
+        // (Measured on a Pixel 9 Pro: padding is 0 here, so `side` and the content
+        // box happen to agree today -- which is exactly why the guess looks
+        // plausible right up until a theme change makes it wrong.)
+        val available = (button.width - button.paddingLeft - button.paddingRight)
+            .coerceAtLeast(1).toFloat()
         val paint = button.paint
+        val label = button.text.toString()
 
         // Work in PIXELS, not sp.
         //
@@ -490,41 +546,56 @@ class MainActivity : AppCompatActivity() {
             TypedValue.COMPLEX_UNIT_SP, 8f, resources.displayMetrics
         )
         val ceilPx = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_SP, widest, resources.displayMetrics
+            TypedValue.COMPLEX_UNIT_SP, WIDEST_KEY_LABEL, resources.displayMetrics
         )
 
-        fun widestWord(px: Float): Float {
+        // Measure the WRAPPED height, by laying the label out at this width and
+        // asking how many lines it needed.
+        //
+        // Measuring the widest single word was wrong, and wrong in the direction
+        // that ships: the binary search happily picked a size at which no individual
+        // word overflowed, while the full string wrapped to a width the key does not
+        // have. "Code review" measured 253px inside a 166px key at the ceiling size
+        // and was reported as fitting, because neither of its two words alone is
+        // over 166px. A StaticLayout is the same machinery the button itself uses to
+        // break lines, so asking it is not an approximation of the answer -- it is
+        // the answer. The label fits when the layout draws in `maxLines` lines or
+        // fewer.
+        fun fitsAt(px: Float): Boolean {
             paint.textSize = px
-            return button.text.toString()
-                .split(' ', '\n')
-                .maxOfOrNull { paint.measureText(it) } ?: 0f
+            val layout = StaticLayout.Builder
+                .obtain(label, 0, label.length, paint, available.toInt())
+                .setMaxLines(MAX_KEY_LINES)
+                .build()
+            // lineCount is the number of lines actually drawn. When maxLines is
+            // exceeded the platform clamps this to maxLines and ellipsises the tail,
+            // so an over-long label reports exactly MAX_KEY_LINES lines and would
+            // look like a pass. getEllipsisCount(line) is what distinguishes "fits in
+            // three lines" from "was cut to three lines": non-zero means characters
+            // were dropped.
+            for (line in 0 until layout.lineCount) {
+                if (layout.getEllipsisCount(line) > 0) return false
+            }
+            return true
         }
 
-        // Binary search the largest text size whose widest WORD still fits.
-        //
-        // Measuring the word, not the whole line, is deliberate: maxLines=3 lets
-        // the label wrap at spaces, so the binding constraint is the longest
-        // single word. A long single word with no break in it is the case that
-        // actually overflows, and it is exactly the case this must catch.
         var lo = floorPx
         var hi = ceilPx
-        repeat(10) {
+        repeat(12) {
             val mid = (lo + hi) / 2f
-            if (widestWord(mid) <= available) lo = mid else hi = mid
+            if (fitsAt(mid)) lo = mid else hi = mid
         }
 
         // Decide by asking the question outright, not by testing where the search
-        // landed. A first cut compared the result against the floor, but the search
-        // converges to just ABOVE the floor when a word cannot fit at any size, so
-        // an unbreakable 21-character label was declared "fits" and rendered clipped
-        // -- the exact failure this function exists to prevent. Measure at the
-        // floor and let that answer it.
-        val fits = widestWord(floorPx) <= available
+        // landed: the search converges to just ABOVE the floor even when the text
+        // cannot fit at any size, so an over-long label would otherwise be declared
+        // "fits" and rendered clipped.
+        val fits = fitsAt(floorPx)
 
         button.textSize = pxToSp(lo)
-        // When it cannot fit, ellipsise on a single line so the readable head of a
-        // long name survives instead of a mid-word hard cut.
-        button.maxLines = if (fits) 3 else 1
+        // When it cannot fit even at the floor, ellipsise on a single line so the
+        // readable head of a long name survives instead of a mid-word hard cut.
+        button.maxLines = if (fits) MAX_KEY_LINES else 1
         button.ellipsize = if (fits) null else android.text.TextUtils.TruncateAt.END
     }
 
