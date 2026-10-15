@@ -90,23 +90,51 @@ object CommandStore {
 
     private fun file(ctx: Context) = File(ctx.filesDir, FILE_NAME)
 
+    /** The deck's fixed key count. The screen shows exactly this many slots. */
+    const val SLOTS = 15
+
+    /**
+     * Force the list to exactly [SLOTS] entries, padding with empty commands.
+     *
+     * WHY the list is fixed rather than growable: these are not rows in a list,
+     * they are POSITIONS ON A PHYSICAL DECK. Key 7 is key 7. If deleting a
+     * command removed the slot, every key after it would shift and the labels
+     * would no longer line up with the hardware the user is looking at. So a slot
+     * is permanent and only its CONTENTS are optional.
+     *
+     * Slot identity is the index, which is also how deck keys are dispatched
+     * (commands.getOrNull(key)). That makes the index the single source of truth
+     * for both the screen and the device, so they cannot disagree.
+     */
+    private fun padToSlots(list: List<Command>): MutableList<Command> {
+        val out = list.take(SLOTS).toMutableList()
+        while (out.size < SLOTS) {
+            out.add(Command(id = "slot${out.size}", label = "", text = ""))
+        }
+        return out
+    }
+
     fun load(ctx: Context): MutableList<Command> {
         val f = file(ctx)
         if (!f.exists()) {
-            val d = defaults().toMutableList()
+            val d = padToSlots(defaults())
             save(ctx, d)
             return d
         }
         return runCatching {
             val arr = JSONArray(f.readText())
-            (0 until arr.length()).map { Command.fromJson(arr.getJSONObject(it)) }
-                .toMutableList()
-        }.getOrElse { defaults().toMutableList() }
+            padToSlots(
+                (0 until arr.length()).map { Command.fromJson(arr.getJSONObject(it)) }
+            )
+        }.getOrElse { padToSlots(defaults()) }
     }
+
+    /** True when this slot holds nothing the user can send. */
+    fun isEmpty(c: Command?): Boolean = c == null || c.text.isBlank()
 
     fun save(ctx: Context, commands: List<Command>) {
         val arr = JSONArray()
-        commands.forEach { arr.put(it.toJson()) }
+        padToSlots(commands).forEach { arr.put(it.toJson()) }
         file(ctx).writeText(arr.toString(2))
     }
 }

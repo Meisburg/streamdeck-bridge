@@ -147,6 +147,13 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
 
+        // --- brand header ---
+        // The product's own name and mark, so the screen announces what it is.
+        // The mark is the Stream Deck key-grid, drawn from the app's own resource
+        // rather than bundled art: it reads as the hardware without shipping an
+        // Elgato asset.
+        root.addView(buildBrandHeader())
+
         // --- status line: one sentence, present ONLY when something is wrong ---
         statusView = TextView(this).apply {
             textSize = 12f
@@ -154,17 +161,17 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(statusView)
 
-        // --- the grid ---
+        // --- the key grid ---
         gridView = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(gridView)
 
-        // --- add ---
-        root.addView(Button(this).apply {
-            text = "+ Add command"
-            textSize = 16f
-            isAllCaps = false
-            setOnClickListener { editCommand(null) }
-        })
+        // NOTE: there is deliberately no "+ Add command" button.
+        //
+        // The grid is the deck's 15 physical keys, not a growable list, so there
+        // is no sixteenth slot to add to. Creating a command happens by tapping an
+        // empty key (or long-pressing any key), which is also the only place it
+        // can possibly go. A separate Add button would have had to ask "which key?"
+        // and then fail once the grid was full.
 
         // --- deck controls, collapsed by default ---
         // Default collapsed: by the class comment above, the deck controls must
@@ -222,31 +229,71 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * The tap grid.
+     * The key grid: the deck's exact physical layout, 3 rows of 5.
      *
-     * Two columns of tall buttons: big enough to hit without looking, which is
-     * the entire point when the alternative is typing on a phone keyboard.
+     * This deliberately mirrors the hardware rather than flowing like a list.
+     * The user is looking at the deck while tapping, so a screen square in the
+     * same position as the physical key removes the translation step entirely:
+     * what you see is where you press. That is also why slots are fixed
+     * positions rather than a growable list (see CommandStore.padToSlots).
+     *
+     * Row sections are labelled because the deck has three physical rows and
+     * naming them gives the user a way to talk and think about position.
      */
     private fun renderGrid() {
         gridView.removeAllViews()
 
-        val perRow = 2
-        var i = 0
-        while (i < commands.size) {
+        val (rows, cols) = DeckProtocol.ROWS to DeckProtocol.COLS
+        for (r in 0 until rows) {
+            gridView.addView(TextView(this).apply {
+                text = "Row ${r + 1}"
+                textSize = 11f
+                setAlpha(0.6f)
+                setPadding(dp(6), if (r == 0) dp(2) else dp(10), dp(4), dp(4))
+            })
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            for (c in 0 until perRow) {
-                val idx = i + c
-                if (idx >= commands.size) {
-                    row.addView(View(this).apply {
-                        layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
-                    })
-                    continue
-                }
-                row.addView(buildCommandButton(commands[idx]))
+            for (c in 0 until cols) {
+                val idx = r * cols + c
+                row.addView(buildKeyButton(idx, commands.getOrNull(idx)))
             }
             gridView.addView(row)
-            i += perRow
         }
+    }
+
+    /**
+     * The brand header: the key-grid mark, then the product name.
+     *
+     * The mark is drawn as a vector (res/drawable/ic_deck_mark.xml), the same
+     * 5x3 layout as the physical deck, so the app announces what it is in the
+     * hardware's own visual language. The wordmark is set in the app's sans face
+     * at a display weight, with tight tracking so the two words read as one unit
+     * rather than two labels.
+     */
+    private fun buildBrandHeader(): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(0), dp(4), dp(10))
+        }
+
+        val mark = android.widget.ImageView(this).apply {
+            setImageResource(R.drawable.ic_deck_mark)
+            layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply {
+                setMargins(0, 0, dp(10), 0)
+            }
+            contentDescription = null   // decorative; the wordmark carries the name
+        }
+        row.addView(mark)
+
+        row.addView(TextView(this).apply {
+            text = "Stream Deck Bridge"
+            textSize = 20f
+            setTypeface(typeface, Typeface.BOLD)
+            letterSpacing = -0.02f
+            setTextColor(Color.parseColor("#E8EAED"))
+        })
+
+        return row
     }
 
     /**
@@ -264,39 +311,85 @@ class MainActivity : AppCompatActivity() {
         return if (t.isNotEmpty()) t.take(18) else "Untitled"
     }
 
-    private fun buildCommandButton(cmd: Command): Button = Button(this).apply {
-        // Never render a useless label. A stale commands.json carried label:"?"
-        // for two entries, which made "Yes" and "Next step" indistinguishable on
-        // the surface whose whole point is tapping without reading carefully.
-        // Treat blank AND punctuation-only labels as missing; the fallback is the
-        // text the button sends, the same way the deck key faces already do.
-        text = labelOrFallback(cmd)
-        textSize = 15f
-        isAllCaps = false
-        maxLines = 2
-        layoutParams = LinearLayout.LayoutParams(0, dp(64), 1f).apply {
-            setMargins(dp(4), dp(4), dp(4), dp(4))
-        }
-        setOnClickListener { sendCommand(cmd) }
-        setOnLongClickListener {
-            AlertDialog.Builder(this@MainActivity)
-                .setTitle(cmd.label)
-                .setItems(
-                    arrayOf(
-                        "Edit",
-                        "Delete",
-                        "Send as-is to Discord",
-                    )
-                ) { _, which ->
-                    when (which) {
-                        0 -> editCommand(cmd)
-                        1 -> deleteCommand(cmd)
-                        2 -> sendForced(cmd, Command.Target.DISCORD)
+    /**
+     * One key on the grid: a square with rounded corners, like the physical key.
+     *
+     * Tap EDIT, long-press for the menu. That inversion is deliberate: this is a
+     * configuration screen, not a send surface. The deck itself and the broadcast
+     * API are how commands actually get sent, and a stray tap here used to fire a
+     * command into whatever happened to be focused -- which is the last thing
+     * anyone wants while editing. Making tap safe means the destructive-in-the-
+     * moment action (sending something unintended) is no longer one slip away.
+     */
+    private fun buildKeyButton(index: Int, cmd: Command?): Button {
+        val empty = CommandStore.isEmpty(cmd)
+        return Button(this).apply {
+            text = if (empty) "Empty" else labelOrFallback(cmd!!)
+            textSize = if (empty) 12f else 13f
+            isAllCaps = false
+            maxLines = 3
+
+            if (empty) {
+                // Empty slots stay visible and tappable so a user who cleared a
+                // key can put something new there. Dimmed so a glance still reads
+                // the grid as mostly-configured.
+                setTextColor(Color.parseColor("#888888"))
+            }
+
+            // Square-ish, sized off the screen width so five fit across. The
+            // height is derived from the same value to keep them square; a fixed
+            // dp height would go rectangular on any other screen width.
+            val side = (resources.displayMetrics.widthPixels - dp(24)) / DeckProtocol.COLS
+            layoutParams = LinearLayout.LayoutParams(0, side - dp(6), 1f).apply {
+                setMargins(dp(3), dp(3), dp(3), dp(3))
+            }
+
+            setOnClickListener { editCommand(if (empty) null else cmd!!, index) }
+
+            setOnLongClickListener {
+                val menu = if (empty) arrayOf("Fill this key")
+                else arrayOf("Edit", "Clear this key", "Send as-is to Discord")
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle(if (empty) "Key ${index + 1} (empty)" else labelOrFallback(cmd!!))
+                    .setItems(menu) { _, which ->
+                        when {
+                            empty -> editCommand(null, index)
+                            which == 0 -> editCommand(cmd!!, index)
+                            // "Clear" empties the CONTENTS but keeps the slot: the
+                            // key is a physical position, not a list row, so it can
+                            // never be removed. See CommandStore.padToSlots.
+                            which == 1 -> clearSlot(index, cmd!!)
+                            else -> sendForced(cmd!!, Command.Target.DISCORD)
+                        }
                     }
-                }
-                .show()
-            true
+                    .show()
+                true
+            }
         }
+    }
+
+    /**
+     * Blank a key's contents while leaving the key in place.
+     *
+     * Deliberately named "clear", not "delete": the slot survives because the
+     * hardware position survives. The user's own words: the keys "should always
+     * stay on the screen even if you remove the text or the commands inside of
+     * them."
+     */
+    private fun clearSlot(index: Int, cmd: Command) {
+        AlertDialog.Builder(this)
+            .setTitle("Clear \"${labelOrFallback(cmd)}\"?")
+            .setMessage("Key ${index + 1} stays on the grid, empty and ready to refill.")
+            .setPositiveButton("Clear") { _, _ ->
+                val blank = cmd.copy(label = "", text = "")
+                commands[index] = blank
+                CommandStore.save(this, commands)
+                renderGrid()
+                refreshKeyFaces()
+                log("cleared key ${index + 1}")
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     /** Force a command down one path, ignoring AUTO. Used to diagnose routing. */
@@ -348,10 +441,20 @@ class MainActivity : AppCompatActivity() {
     // EDIT
     // =====================================================================
 
-    private fun editCommand(existing: Command?) {
+    /**
+     * Edit the command in a specific key slot.
+     *
+     * Takes a slot INDEX rather than just a Command, because the slot is the
+     * identity here. Two keys could hold identical commands, so finding "the"
+     * command by value would edit the wrong key; and a newly-filled key has no
+     * command yet, only a position. Passing the index makes both cases exact.
+     *
+     * slot = -1 means "no particular key" and falls back to the first empty one.
+     */
+    private fun editCommand(existing: Command?, slot: Int = -1) {
         val isNew = existing == null
         val cur = existing ?: Command(
-            id = java.util.UUID.randomUUID().toString(),
+            id = if (slot >= 0) "slot$slot" else java.util.UUID.randomUUID().toString(),
             label = "",
             text = "",
         )
@@ -378,8 +481,18 @@ class MainActivity : AppCompatActivity() {
         layout.addView(TextView(this).apply { text = "\nText to send"; textSize = 12f })
         layout.addView(textInput)
 
-        // target picker
+        // Target picker, behind a disclosure.
+        //
+        // This used to be a primary field in the dialog, which asked the user a
+        // question they mostly cannot answer: AUTO already routes to whatever has
+        // focus, which is right in nearly every case. Putting it behind a tap keeps
+        // it available for the rare case without making every edit a routing
+        // decision. The user's own framing: it "seems irrelevant."
         var target = cur.target
+        val targetBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
         val targetRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val targetBtns = mutableListOf<Button>()
         Command.Target.values().forEach { t ->
@@ -398,13 +511,25 @@ class MainActivity : AppCompatActivity() {
             targetBtns.add(b)
             targetRow.addView(b)
         }
-        layout.addView(TextView(this).apply { text = "\nWhere to send it"; textSize = 12f })
-        layout.addView(targetRow)
-        layout.addView(TextView(this).apply {
+        targetBox.addView(targetRow)
+        targetBox.addView(TextView(this).apply {
             text = "Sends into whatever text field is focused."
             textSize = 10f
             setAlpha(0.7f)
         })
+
+        layout.addView(Button(this).apply {
+            text = "Advanced"
+            textSize = 12f
+            isAllCaps = false
+            setPadding(0, dp(16), 0, 0)
+            setOnClickListener {
+                val showing = targetBox.visibility == View.VISIBLE
+                targetBox.visibility = if (showing) View.GONE else View.VISIBLE
+                text = if (showing) "Advanced  ▸" else "Advanced  ▾"
+            }
+        })
+        layout.addView(targetBox)
 
         var submit = cur.submit
         layout.addView(Button(this).apply {
@@ -429,14 +554,22 @@ class MainActivity : AppCompatActivity() {
                     target = target,
                     submit = submit,
                 )
-                if (isNew) {
-                    commands.add(updated)
-                } else {
-                    val at = commands.indexOfFirst { it.id == existing!!.id }
-                    if (at >= 0) commands[at] = updated else commands.add(updated)
+                // Write back to the SLOT, never append. The grid is a fixed set of
+                // 15 deck positions, so editing key 7 must change key 7; appending
+                // would grow the list and desync the screen from the hardware.
+                if (slot >= 0 && slot < commands.size) {
+                    commands[slot] = updated
+                } else if (isNew) {
+                    // No slot supplied: fall back to the first empty one.
+                    val free = commands.indexOfFirst { CommandStore.isEmpty(it) }
+                    if (free >= 0) commands[free] = updated else commands[0] = updated
                 }
                 CommandStore.save(this, commands)
                 renderGrid()
+                // Keep the physical panel in step with the screen. Without this,
+                // editing a key updated the phone but left the deck showing the
+                // old face until the next connect, which reads as "it didn't save".
+                refreshKeyFaces()
                 log("saved '${updated.label}'")
             }
             .setNegativeButton("Cancel", null)
@@ -444,27 +577,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Delete with a confirmation.
+     * Re-draw the deck's key faces from the current slots.
      *
-     * Deleting a command also orphans any deck key bound to its position, so
-     * this used to be silent and irreversible. A confirmation is the cheap fix
-     * for a one-way action; the real undo belongs with a proper Material
-     * snackbar, which this project has no dependency for yet.
+     * Called after any edit so the physical panel matches the screen immediately
+     * rather than only on the next connect. Cheap when the deck is absent: it
+     * returns without doing anything if the transport is null or disconnected.
      */
-    private fun deleteCommand(cmd: Command) {
-        val name = cmd.label.ifBlank { cmd.text.take(18) }
-        AlertDialog.Builder(this)
-            .setTitle("Delete \"$name\"?")
-            .setMessage("This also frees its Stream Deck key.")
-            .setPositiveButton("Delete") { _, _ ->
-                commands = commands.filterNot { it.id == cmd.id }.toMutableList()
-                CommandStore.save(this, commands)
-                renderGrid()
-                log("deleted '$name'")
-                toast("Deleted $name")
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+    private fun refreshKeyFaces() {
+        val t = transport ?: return
+        if (!t.isConnected()) return
+        pushAllKeyImages(t)
     }
 
     // =====================================================================
