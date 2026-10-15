@@ -44,16 +44,19 @@ class DeckSettings(private val ctx: Context) {
     /**
      * Whether key images are rotated 180 degrees before upload.
      *
-     * Defaults to false. The flip was inherited from a note claiming every deck in
-     * this family renders upside down, and it went unverified because the images
-     * never reached the panel until now -- the writes were being dropped for an
-     * unrelated reason. The first face seen on real hardware was upside down, so the
-     * note does not hold for this unit.
+     * Defaults to TRUE: this hardware renders an unrotated face upside down. Proven
+     * by observation rather than inherited -- with the flip off, every label on the
+     * panel was inverted, and restoring it corrected them.
+     *
+     * Kept as a setting rather than a hardcoded call because the original version was
+     * a hardcoded call whose justification could not be checked (no image had ever
+     * reached the panel), and the only way to settle it was to change it and look. A
+     * setting makes that a two-second experiment instead of a rebuild.
      */
     fun rotateImages(): Boolean = runCatching {
-        if (file.exists()) JSONObject(file.readText()).optBoolean("rotateImages", false)
-        else false
-    }.getOrDefault(false)
+        if (file.exists()) JSONObject(file.readText()).optBoolean("rotateImages", true)
+        else true
+    }.getOrDefault(true)
 
     fun setRotateImages(on: Boolean) {
         runCatching {

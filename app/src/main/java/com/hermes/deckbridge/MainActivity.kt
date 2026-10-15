@@ -471,6 +471,30 @@ class MainActivity : AppCompatActivity() {
                     " textH=${layout.height} boxH=${key.height}"
             )
         }
+        dumpKeyFace()
+    }
+
+    /**
+     * Write every rendered key face to filesDir so it can be pulled and inspected.
+     *
+     * These 72x72 images are exactly what the deck receives, so checking them answers
+     * "is the text centred, is it the right size, is it rotated" locally, without
+     * looking at the hardware. The centring bug that shipped twice was invisible in
+     * code and invisible on the phone screen; it only existed in these bitmaps.
+     */
+    private fun dumpKeyFace() {
+        for (i in 0 until 15) {
+            val cmd = commands.getOrNull(i)
+            val label = cmd?.let { labelOrFallback(it) } ?: EMPTY_LABEL
+            val bmp = KeyImage.renderBitmap(label, active = !cmd?.text.isNullOrBlank())
+            runCatching {
+                java.io.FileOutputStream(java.io.File(filesDir, "keyface$i.png")).use {
+                    bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                }
+            }
+            bmp.recycle()
+        }
+        Log.i("deckfit", "wrote keyface0..14.png to filesDir")
     }
 
     /**

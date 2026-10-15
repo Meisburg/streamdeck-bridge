@@ -74,7 +74,24 @@ object KeyImage {
      * @param index   key index, kept for the caller's logging and ordering
      * @param active  true when the macro has content worth showing
      */
-    fun render(label: String, index: Int, active: Boolean = true): ByteArray {
+    fun render(label: String, index: Int, active: Boolean = true): ByteArray =
+        renderBitmap(label, active).let { bmp ->
+            val out = ByteArrayOutputStream()
+            bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
+            bmp.recycle()
+            out.toByteArray()
+        }
+
+    /**
+     * Draw a key face, unrotated and uncompressed.
+     *
+     * Split out from [render] so the same drawing code can be written to a PNG and
+     * inspected. A key image is 72x72 and there is no way to tell by reading code
+     * whether text is centred in it; the previous attempt at centring was reasoned
+     * out incorrectly and only caught by looking at the hardware. Being able to pull
+     * the exact bitmap the deck will receive turns that into a local check.
+     */
+    fun renderBitmap(label: String, active: Boolean = true): Bitmap {
         val bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
 
@@ -92,46 +109,56 @@ object KeyImage {
         val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 1.5f
-            style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
             color = if (active) BORDER else BORDER_EMPTY
         }
         c.drawRoundRect(face, radius, radius, stroke)
 
         val text = if (label.isBlank()) "—" else label
-        // Leave room for the rounded corner and the border. 8px each side of a 72px
-        // face keeps the glyphs off the curve.
-        val maxWidth = SIZE - 16
+        // Text is laid out across the FULL key width so the layout's own centring
+        // puts it in the middle of the square. Inset only by a couple of pixels for
+        // the border stroke: the rounded corners do not eat glyphs at this size, and
+        // reserving 8px a side made even a one-character label sit visibly left of
+        // centre.
+        val insetting = 3
+        val layoutWidth = SIZE - insetting * 2
 
         val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = if (active) FG else DIM
-            textAlign = Paint.Align.CENTER
+            // ALIGN_CENTER is set on the layout, not the paint. Setting Paint.Align
+            // here as well double-centres: StaticLayout centres within its width, and
+            // then the paint shifts each line again by half its own advance, which is
+            // what pushed labels off-centre by different amounts depending on their
+            // length.
+            textAlign = Paint.Align.LEFT
             // DEFAULT weight, matching the screen. Bold here is what made the two
             // surfaces wrap the same label onto different numbers of lines.
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
         }
 
-        val size = fitSize(text, paint, maxWidth)
+        val size = fitSize(text, paint, layoutWidth)
         paint.textSize = size
 
         // The platform's own line breaker, same as the screen's buttons use, so a
         // label wraps identically in both places.
         val layout = StaticLayout.Builder
-            .obtain(text, 0, text.length, paint, maxWidth)
+            .obtain(text, 0, text.length, paint, layoutWidth)
             .setAlignment(Layout.Alignment.ALIGN_CENTER)
             .setMaxLines(MAX_LINES)
             .setIncludePad(false)
             .build()
 
+        // Centre vertically on the layout's own height. includePad(false) keeps the
+        // box tight to the glyphs, so this centres the visible text rather than the
+        // font's full ascent/descent box.
+        val top = (SIZE - layout.height) / 2f
+
         c.save()
-        c.translate((SIZE - maxWidth) / 2f, (SIZE - layout.height) / 2f)
+        c.translate(insetting.toFloat(), top)
         layout.draw(c)
         c.restore()
 
-        val out = ByteArrayOutputStream()
-        bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
-        bmp.recycle()
-        return out.toByteArray()
+        return bmp
     }
 
     /**
