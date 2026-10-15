@@ -101,11 +101,20 @@ object CommandStore {
         Command("codereview", "Code review", "/code-review"),
         Command("pr", "PR", "/pr"),
 
-        // --- Row 3: reflect and recover, then three empty slots ---
+        // --- Row 3: repair, reflect, then two empty slots ---
+        // Recovery lives on the row with the other repair key, because both answer
+        // "that is not what I wanted" rather than advancing the build.
+        //
+        // Every key in the flow above ends by changing something: implementing,
+        // committing, opening a PR. None of them can be taken back from this pad, so
+        // without this the one state the flow cannot reach is the state after it did
+        // too much. /diagnosing-bugs covers "it is broken"; nothing covered "it
+        // worked, and I did not want that."
+        Command("undo", "Undo", "undo that last change"),
         Command("retro", "Retro", "/retro"),
         // The one branch the flow above has no answer for. A key that covers
         // "something is broken" earns its place more than a third variation on
-        // "build a feature", which is what the three empty slots are there to resist.
+        // "build a feature", which is what the empty slots are there to resist.
         Command("diagnose", "Diagnose", "/diagnosing-bugs"),
     )
 
