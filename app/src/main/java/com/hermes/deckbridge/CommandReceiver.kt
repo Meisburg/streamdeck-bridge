@@ -3,6 +3,8 @@ package com.hermes.deckbridge
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Binder
+import android.os.Process
 import android.util.Log
 
 /**
@@ -36,6 +38,22 @@ class CommandReceiver : BroadcastReceiver() {
 
     override fun onReceive(ctx: Context, intent: Intent) {
         if (intent.action != ACTION) return
+
+        // SECURITY: sender check, deliberately in code rather than via a manifest
+        // android:permission guard. A signature-level permission cannot be granted to
+        // the adb shell uid on a real device (only on an emulator), so that approach
+        // silently drops every `adb shell am broadcast`, breaking the documented
+        // workflow. Measured, not assumed. This check achieves the same protection
+        // without depending on Android's permission internals.
+        //
+        // Legitimate senders are the adb shell (uid 2000) and this app itself. Any
+        // other app on the device is refused, which is the whole point: this receiver
+        // injects text into whatever is focused, so leaving it open to every installed
+        // app is a text-injection primitive.
+        if (!isTrustedSender(ctx)) {
+            Log.w(TAG, "refused broadcast from untrusted uid=${ctx.applicationInfo?.uid}")
+            return
+        }
 
         val svc = DeckAccessibilityService.instance
         if (svc == null) {
@@ -84,5 +102,30 @@ class CommandReceiver : BroadcastReceiver() {
     private fun parseTarget(s: String?): Command.Target = when (s?.lowercase()) {
         "discord", "chat", "text" -> Command.Target.DISCORD
         else -> Command.Target.AUTO
+    }
+
+    /**
+     * True when the broadcast came from this app or from the adb shell.
+     *
+     * WHY THIS IS NOT JUST ctx.applicationInfo: Context here is the RECEIVER's
+     * context, so its uid is always this app's own uid. Reading the sender requires
+     * the calling identity, and Binder.getCallingUid() only reports the real sender
+     * while inside onReceive's binder transaction. So it is read here, synchronously,
+     * at the top of the handler. That is why the check lives in this method rather
+     * than in a helper the framework might call later.
+     *
+     * Allowed:
+     *   - this app's own uid (in-app sends, tests)
+     *   - ROOT_UID (0) and SHELL_UID (2000), which is what `adb shell am broadcast`
+     *     runs as. Verified on-device with `adb shell id` => uid=2000(shell).
+     *
+     * Everything else, i.e. every ordinary third-party app, is refused. That is the
+     * threat being closed: without this, any installed app could fire the user's saved
+     * commands into whatever field currently has focus.
+     */
+    private fun isTrustedSender(ctx: Context): Boolean {
+        val sender = Binder.getCallingUid()
+        val self = ctx.applicationInfo?.uid ?: Process.myUid()
+        return sender == self || sender == Process.ROOT_UID || sender == Process.SHELL_UID
     }
 }

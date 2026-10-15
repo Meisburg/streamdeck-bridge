@@ -7,5 +7,6 @@
       "Stream Deck Bridge" in full, where there is room for it.
     -->
     <string name="app_name">SD Bridge</string>
+    <string name="perm_trigger_desc">Allows an app signed with the same key to send Stream Deck Bridge commands. Granted to nothing by default; adb shell does not need it.</string>
     <string name="a11y_description">Types Stream Deck macro text into the focused app, such as Discord or Collie.</string>
 </resources>

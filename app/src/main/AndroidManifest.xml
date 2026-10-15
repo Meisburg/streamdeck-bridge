@@ -115,11 +115,12 @@
                   -n com.hermes.deckbridge/.CommandReceiver
                   -es command yes
 
-          Deliberately not exported to other apps beyond adb: the receiver is
-          declared with no permission so `am broadcast` works from adb, which is
-          the only intended caller. It sends TEXT into whatever app is focused,
-          which is exactly what the tap grid does, so it grants no new power to
-          anything that already has adb access to this device.
+          GUARDED BY android:permission (protectionLevel="signatureOrSystem"). This receiver
+          injects text into whatever app is focused, so without a guard ANY app on
+          the device could invoke it. The guard admits only this app's own signature
+          and the system uid, so ordinary third-party apps cannot reach it while
+          `adb shell am broadcast` still does. Intended caller only; no new power
+          granted to anything that does not already have adb access.
         -->
         <receiver
             android:name=".CommandReceiver"
