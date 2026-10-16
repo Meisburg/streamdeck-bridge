@@ -1,99 +1,70 @@
-# SD Bridge (Stream Deck Bridge)
+# SD Bridge
+
+Control your AI agent from your phone with a physical Stream Deck.
+
+Press a key to send a prompt or slash command to any focused Android text field. No typing, no app specific integration, no cloud service.
 
 <p align="center">
-  <img src="screenshots/hero.png" alt="A Stream Deck plugged into an Android phone, its keys labelled with agent commands, with the phone running a terminal session" width="320">
+  <img src="screenshots/hero.png" alt="SD Bridge running on a Stream Deck and Android phone" width="340">
 </p>
 
-Press a physical Stream Deck key, and pre-written text lands in whatever app is open
-on your Android phone. Built for driving an AI agent from your pocket.
+## Get started
 
-## Install
+1. [Download the APK](https://github.com/Meisburg/streamdeck-bridge/releases).
+2. Open SD Bridge, tap **Deck setup**, then **Enable typing service**.
+3. Enable SD Bridge in Android Accessibility settings.
+4. Connect your Stream Deck via USB and grant permission.
+5. Open your AI agent, tap its input field, and press a key.
 
-Download the APK from [Releases](https://github.com/Meisburg/streamdeck-bridge/releases) and open it. Or build from source:
+**Requirements:** Android 9 or newer, USB host support, an Elgato Stream Deck, and a USB adapter or cable.
 
-```bash
-git clone https://github.com/Meisburg/streamdeck-bridge
-cd streamdeck-bridge && ./build.sh
-adb install app/build/outputs/apk/debug/app-debug.apk
-```
+## What can it do?
 
-## Set it up
+The 15 default keys cover a complete AI coding workflow:
 
-1. Open the app, tap **Deck setup**, then **Enable typing service**.
-2. You land in Settings. Find **SD Bridge** and turn it on. Android makes you do this by hand.
+| Plan | Build | Improve |
+|---|---|---|
+| Recommend | Write a spec | Undo |
+| Approve | Create tickets | Hand off |
+| Explain | Implement | Diagnose |
+| Ask Matt | Review code | Retrospect |
+| Grill | Prepare a PR | Improve architecture |
 
-Plug in the deck and allow the USB permission when Android asks.
+Every key is customizable. Send your own prompts, or slash commands your agent supports.
 
-## Use it
+Slash commands need the matching skill installed. The defaults use [Matt Pocock's skills](https://github.com/mattpocock/skills).
 
-Open any app, tap its text field, press a key. That is the whole workflow.
+See [The 15 default commands](#the-15-default-commands) for the exact text behind each key.
+
+## Privacy
+
+- No networking, telemetry, or analytics.
+- Commands are stored locally.
+- Accessibility access is used to find the focused field and enter your configured text.
+
+[The accessibility disclosure](#the-accessibility-disclosure) covers exactly what it can and cannot see.
+
+## Troubleshooting
+
+- **Nothing types:** Re-enable the SD Bridge accessibility service.
+- **Blank key labels:** Open **Deck setup** and tap **Re-arm keys**.
+- **Build fails:** Run `./build.sh`, which pins JDK 21.
+
+## How it works
+
+SD Bridge talks to the Stream Deck directly over USB and types into the focused Android text field. It supports configurable submission behavior, including Enter or a send button where the app allows it.
+
+See the source code for implementation details, or [How the deck protocol works](#how-the-deck-protocol-works) for the USB details.
+
+## License
+
+MIT. Not affiliated with or endorsed by Elgato.
 
 ---
 
 Everything below is reference. You do not need it to get started.
 
-[The 15 default keys](#the-15-default-commands) · [Troubleshooting](#troubleshooting) · [Accessibility disclosure](#the-accessibility-disclosure) · [Deck protocol](#how-the-deck-protocol-works) · [Limitations](#known-limitations) · [Why this exists](#why-this-exists)
-
----
-
-## Troubleshooting
-
-**Keys press, but nothing types.** The accessibility grant is off. Check the red
-banner at the top of the app; it links straight to the setting. Unplugging the deck
-does not affect this. Reinstalling the app or clearing its data does.
-
-**Labels are blank on the deck.** Tap **Deck setup**, then **Re-arm keys**. It also re-arms itself after a
-period of silence.
-
-**Build fails with `IllegalArgumentException: 26.0.2.1`.** You used plain `./gradlew`
-on Java 26+. Use `./build.sh`, which pins JDK 21.
-
-### Requirements
-
-- An Android phone with **USB host support** (OTG). No OTG? The tap grid still works.
-- Android 9.0 (API 29) or newer.
-- An Elgato Stream Deck. MK.2 and the 15-key models are what this was built against.
-- A USB-C to USB-A cable or adapter.
-
----
-
-## Chatting with your AI agent from the deck
-
-Your agent is a conversation, and a conversation is mostly a handful of things you say over and over. "What do you recommend?" "Continue." "Explain that more simply." "Undo that." Typing those on a phone keyboard is friction, and friction is what stops you from steering the agent at all. So each one becomes a physical key.
-
-### Why a deck instead of just typing
-
-The agent workflow has a shape. You align on what to build, you break it into work, you build it, you review it, you ship it. That is four or five phases, and while you are *in* a phase you say the same few things: approve, continue, explain, undo.
-
-A key removes the typing, the unlocking, and the app-switching, which matters most in the two situations where you would otherwise not bother:
-
-- You are **away from the desk**, phone in hand, and want to keep a build moving.
-- You are **mid-flow** and the agent just did something you want to redirect.
-
-The deck does not make the agent smarter. It removes the cost of steering it, so you steer it more.
-
-### The one thing to understand first
-
-A key can send any text: plain words, or a slash command.
-
-- Plain words (`approved`, `undo that last change`) are just a message. The agent reads them like anything you typed.
-- A slash command (`/to-spec`, `/handoff`) triggers a named capability in the agent's own harness.
-
-Nothing special is needed to support slash commands. The text is typed and submitted like any other entry. Because it can name a capability, a key can also start one.
-
-A slash key only works if your agent has that skill installed. If it does not, the key types a line the agent cannot interpret, which looks like the key failing. Every slash command below names a skill from [mattpocock/skills](https://github.com/mattpocock/skills); install that set first, or edit the keys to match whatever your agent answers to.
-
-### Setup
-
-Nothing beyond the normal install. Because the app sends to whatever is focused, the sequence is:
-
-1. Open your agent (a chat app, a terminal running a coding agent, a web UI).
-2. Tap its text field so the cursor is in it.
-3. Press a key.
-
-The app never needs to know which agent you use. It types into the focused field and submits.
-
-If your agent runs in a **terminal**, see `DeckKeyboardService` in the repository layout: terminal apps often accept input only from an active IME, so there is an optional keyboard path for that case.
+[The accessibility disclosure](#the-accessibility-disclosure) · [Why this exists](#why-this-exists) · [Limitations](#known-limitations) · [Deck protocol](#how-the-deck-protocol-works) · [Repository layout](#repository-layout) · [Trademark](#license-and-trademark)
 
 ---
 
@@ -340,11 +311,9 @@ rediscover them.
 
 ---
 
-## License
+## License and trademark
 
 MIT. See [LICENSE](LICENSE).
-
-## Icon and trademark
 
 The icon is an original mark: a bridge span over five key-lights, drawn for this
 project. It is yours to keep or replace under the MIT license.
