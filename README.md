@@ -22,20 +22,26 @@ terminal. No root, no accounts, no network calls.
    adb install app/build/outputs/apk/debug/app-debug.apk
    ```
 
-2. **Turn on the typing service.** Open the app → **Deck setup** → **Enable typing service**. In the Settings screen that opens, turn on **SD Bridge**.
+## Set up the typing service
 
-3. **Plug in the deck.** Allow the USB permission when Android asks.
+**This is the step people miss.** Android does not let an app enable its own
+accessibility service — that is the malware protection — so this one is manual.
 
-**Then send:** open any app, tap its text field, press a deck key. That is the whole
-workflow.
+1. Open the app → **Deck setup** → **Enable typing service**.
+2. You land in Settings. Find **SD Bridge** and turn it on.
 
-That is the app. Everything below is reference.
+It survives reboots and app updates. It does **not** survive a reinstall or a data
+clear; redo it then. (See [Troubleshooting](#troubleshooting) if keys press and
+nothing types.)
+
+Then plug in the deck and allow the USB permission when Android asks.
+
+**Done.** Open any app, tap its text field, press a deck key.
 
 ---
 
 ## More
 
-- [Why this exists](#why-this-exists) — the origin story
 - [The 15 default keys](#the-15-default-commands) — what ships, and how to change it
 - [Chatting with your AI agent](#chatting-with-your-ai-agent-from-the-deck) — the intended use case
 - [Troubleshooting](#troubleshooting) · [Requirements](#requirements) · [Limitations](#known-limitations)
@@ -62,50 +68,6 @@ on Java 26+. Use `./build.sh`, which pins JDK 21.
 - Android 9.0 (API 29) or newer.
 - An **Elgato Stream Deck** — MK.2 and the 15-key models are what this was built against.
 - A USB-C to USB-A cable or adapter.
-
----
-
-## Why this exists
-
-I'm constantly on the go, and I wanted my phone to drive my agents, not just read
-them. Voice gets me most of the way — but there are plenty of moments where I
-can't talk out loud. A meeting, a sleeping kid, a coffee shop. In those moments,
-typing every prompt on a phone keyboard is the thing that stops me steering at
-all.
-
-I had Stream Decks sitting on my desk. I wondered whether I could press a key and
-have canned text land in my agent.
-
-Elgato ships Windows and Mac software only. No Android. So this is a rebuild of
-what the desktop app does, for a phone.
-
-Getting there meant reverse-engineering the HID protocol, which
-[rea](https://github.com/morluto/rea) made possible: an open-source toolkit for
-taking apart the official software and working out how it talks to the hardware.
-The findings are written up in [How the deck protocol
-works](#how-the-deck-protocol-works) so the next person does not have to
-rediscover them.
-
----
-
-## What it does
-
-<p align="center">
-  <img src="screenshots/app.png" alt="SD Bridge: a 15-key grid of agent commands, three rows of five" width="420">
-</p>
-
-<p align="center">
-  <em>15 on-screen keys, mirrored to 15 physical deck keys.</em>
-</p>
-
-- **Two surfaces, one set of commands.** A 15-key tap grid in the app (no hardware
-  needed), and the same 15 commands on the physical deck.
-- **Send a prompt, or launch a capability.** Any text, including your agent's slash
-  commands. A key becomes a launcher for the actions you actually use.
-- **Your labels show up on the deck.** Each physical key is a little LCD showing its
-  own label, so the hardware tells you what it does.
-- **Tap to edit, long-press for more.** Edit / Clear / Send-as-is.
-- **No root, no accounts, no network calls, no analytics.**
 
 ---
 
@@ -152,6 +114,10 @@ If your agent runs in a **terminal**, see `DeckKeyboardService` in the repositor
 ---
 
 ## The 15 default commands
+
+<p align="center">
+  <img src="screenshots/app.png" alt="SD Bridge: a 15-key grid of agent commands, three rows of five" width="380">
+</p>
 
 The defaults are not a random list of macros. They are **the phases of building a feature, in the order the phases happen**, laid out so the physical position of a key tells you where you are.
 
@@ -364,6 +330,29 @@ is the mapping layer between a key and its action, stored as editable JSON in th
 app's private directory, which is what makes the deck scriptable from a
 workstation. `UsbProbe` exists because `controlTransfer` calls were timing out at
 exactly the read timeout, and a guess about why would have been wrong.
+
+---
+
+## Why this exists
+
+I'm constantly on the go, and I wanted my phone to drive my agents, not just read
+them. Voice gets me most of the way — but there are plenty of moments where I
+can't talk out loud. A meeting, a sleeping kid, a coffee shop. In those moments,
+typing every prompt on a phone keyboard is the thing that stops me steering at
+all.
+
+I had Stream Decks sitting on my desk. I wondered whether I could press a key and
+have canned text land in my agent.
+
+Elgato ships Windows and Mac software only. No Android. So this is a rebuild of
+what the desktop app does, for a phone.
+
+Getting there meant reverse-engineering the HID protocol, which
+[rea](https://github.com/morluto/rea) made possible: an open-source toolkit for
+taking apart the official software and working out how it talks to the hardware.
+The findings are written up in [How the deck protocol
+works](#how-the-deck-protocol-works) so the next person does not have to
+rediscover them.
 
 ---
 
