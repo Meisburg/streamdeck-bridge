@@ -3,8 +3,11 @@ package com.hermes.deckbridge
 /**
  * Stream Deck HID protocol, implemented to the official Elgato HID API spec
  * (docs.elgato.com/streamdeck/hid/general), verified against live hardware:
- * Elgato Stream Deck MK.2, model 20GAA9902, PID 0x006D, sn AL33J2C06045,
- * attached to a Pixel 9 Pro.
+ * Elgato Stream Deck MK.2, model 20GAA9902, PID 0x006D, attached to a Pixel 9 Pro.
+ *
+ * The protocol was worked out by reverse-engineering the official desktop app with
+ * rea (github.com/morluto/rea), then checked against the device. Every constant
+ * below comes from that work.
  *
  * THREE CHANNELS, and using the wrong one silently does nothing:
  *

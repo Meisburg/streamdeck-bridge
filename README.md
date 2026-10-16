@@ -7,8 +7,7 @@ Turn a physical Stream Deck into a command pad for AI agents on Android. Approve
 
 **Platform:** Android only. There is no iOS version, and none is in progress.
 
-**Hardware:** I've only tested this against the MK.2 (20GAA9902). Other models may work as-is, since they share the same HID protocol, but I
- haven't verified them. If you get one working, a pull request is welcome."
+**Hardware:** I've only tested this against the MK.2 (20GAA9902). Other models may work as-is, since they share the same HID protocol, but I have not verified them. If you get one working, a pull request is welcome.
 
 <p align="center">
   <img src="screenshots/hero.png" alt="SD Bridge connecting a physical Stream Deck to an Android phone" width="340">
