@@ -1,5 +1,5 @@
 
-# SD Bridge
+# Stream Deck Bridge
 
 **Your AI coding agent, one keypress away.**
 
