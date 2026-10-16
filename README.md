@@ -8,14 +8,65 @@
   <em>A physical deck, an Android phone, and a cable. Press a key, and the text lands in your agent.</em>
 </p>
 
----
-
 Turn an Elgato Stream Deck into a macro pad for your **Android phone**. Press a
 physical deck key, and pre-written text lands in whatever app is focused: a chat
 app, an AI agent, a notes field, anywhere you'd otherwise type.
 
-Built for people who want one-tap commands without unlocking, hunting for an app,
-and typing on a phone keyboard.
+[Install](#install) · [The 15 default keys](#the-15-default-commands) · [Why this exists](#why-this-exists) · [Limitations](#known-limitations)
+
+---
+
+## Install
+
+Build it yourself; there is no Play Store listing.
+
+```bash
+git clone https://github.com/Meisburg/streamdeck-bridge
+cd streamdeck-bridge
+./build.sh
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+Or grab the APK from [Releases](https://github.com/Meisburg/streamdeck-bridge/releases), or open the folder in Android Studio and hit Run.
+
+`build.sh` pins JDK 21 by path. Plain `./gradlew` fails on Java 26 or newer with
+`java.lang.IllegalArgumentException: 26.0.2.1` — the Kotlin Gradle plugin cannot
+parse a four-part version string. Use `./build.sh`, or point
+`org.gradle.java.home` at a JDK 21 install.
+
+### First-run setup
+
+1. Open **SD Bridge**.
+2. Tap **Deck setup**, then **Enable typing service**.
+3. In the Settings screen that opens, find **SD Bridge** and turn it on.
+4. Plug in your Stream Deck. Android asks for USB permission: allow it.
+
+That's it. The binding persists across reboots.
+
+> **Do not clear the app's data** (or run `adb shell pm clear`) unless you are
+> prepared to redo step 3. Android wipes the accessibility grant with the data,
+> and **nothing** can restore it programmatically: not the app, not ADB. That is
+> deliberate, and it is why the toggle is manual.
+
+### Requirements
+
+- An Android phone with **USB host support** (OTG). No OTG? The tap grid still works.
+- Android 9.0 (API 29) or newer.
+- An **Elgato Stream Deck** — MK.2 and the 15-key models are what this was built against.
+- A USB-C to USB-A cable or adapter. PD passthrough if you want to charge while decked.
+
+---
+
+## Daily use
+
+Nothing to press before a send.
+
+1. Open the app you want text to land in (a chat app, your agent, anything).
+2. Tap its text field.
+3. Press a key, on the phone screen or the physical deck.
+
+If labels go blank after replugging, tap **Deck setup** → **Re-arm keys**. It also
+re-arms itself after a period of silence.
 
 ---
 
@@ -52,91 +103,14 @@ rediscover them.
   <em>15 on-screen keys, mirrored to 15 physical deck keys.</em>
 </p>
 
-- **Two surfaces, one set of commands.** A 15-key tap grid in the app (works with
-  no hardware at all, from a phone in your pocket), and the same 15 commands bound
-  to the physical keys of a USB Stream Deck.
-- **Your labels show up on the deck.** Each physical key is a little LCD, and it
-  displays its own label, so the hardware tells you what each key does instead of
-  you having to remember positions.
-- **Send a prompt, or launch a capability.** A key can send any text, including
-  your agent's slash commands or skills. Press a key, and the capability runs. That
-  turns the deck into a launcher for the handful of agent actions you actually use,
-  instead of a text pad.
-- **Tap a key to edit it.** No long-press-to-edit dance, no separate config screen.
-- **Long-press a key** for Edit / Clear / Send-as-is.
-- **Send confirmation.** After every send the app posts a notification telling you
-  what it typed and whether it landed, because the app backgrounds itself to send.
-- **Brightness control** for the deck backlight, to save battery. Persisted, so it
-  survives replugs and reboots.
-- **No root.** No ADB required for normal use. No accounts, no network calls, no
-  analytics.
-
----
-
-## Requirements
-
-- An Android phone with **USB host support** (OTG). Most modern phones have it; if
-  yours doesn't, the tap grid still works perfectly.
-- An **Elgato Stream Deck** (MK.2 and the 15-key models are what this was developed
-  and tested against).
-- Android 9.0 (API 29) or newer.
-- A USB-C to USB-A adapter or cable that fits your phone, ideally with PD
-  passthrough if you want to charge while the deck is attached.
-
----
-
-## Install
-
-Build it yourself; there is no Play Store listing.
-
-```bash
-git clone https://github.com/Meisburg/streamdeck-mobile
-cd streamdeck-mobile
-./build.sh
-adb install app/build/outputs/apk/debug/app-debug.apk
-```
-
-`build.sh` pins JDK 21 by path. If you use plain `./gradlew` instead and your
-machine's default Java is 26 or newer, the build fails with a message that names
-neither Java nor the version problem:
-
-```
-java.lang.IllegalArgumentException: 26.0.2.1
-```
-
-That is the Kotlin Gradle plugin failing to parse a four-part version string. Use
-`./build.sh`, or point `org.gradle.java.home` at a JDK 21 install.
-
-Or open the folder in Android Studio and hit Run.
-
-### First-run setup
-
-1. Open **SD Bridge**.
-2. Tap **Deck setup**, then **Enable typing service**.
-3. In the Android Settings screen that opens, find **SD Bridge** and turn it on.
-   Android will warn you about what an accessibility service can do. See the
-   disclosure below for exactly what this one does.
-4. Plug in your Stream Deck. Android asks for USB permission: allow it.
-
-That's it. The binding persists across reboots.
-
-> **Do not clear the app's data** (or run `adb shell pm clear`) unless you are
-> prepared to re-do step 3. Android wipes the accessibility grant along with the
-> data, and **nothing** can restore it programmatically: not the app, not ADB.
-> That restriction is deliberate, and it is why the toggle is a manual step.
-
----
-
-## Daily use
-
-There is nothing to press before a send.
-
-1. Open the app you want text to land in (a chat app, your agent, anything).
-2. Tap its text field.
-3. Press a key, on the phone screen or the physical deck.
-
-If labels ever go blank after unplugging and replugging, tap **Deck setup** and use
-**Re-arm keys**. It also re-arms itself automatically after a period of silence.
+- **Two surfaces, one set of commands.** A 15-key tap grid in the app (no hardware
+  needed), and the same 15 commands on the physical deck.
+- **Send a prompt, or launch a capability.** Any text, including your agent's slash
+  commands. A key becomes a launcher for the actions you actually use.
+- **Your labels show up on the deck.** Each physical key is a little LCD showing its
+  own label, so the hardware tells you what it does.
+- **Tap to edit, long-press for more.** Edit / Clear / Send-as-is.
+- **No root, no accounts, no network calls, no analytics.**
 
 ---
 
