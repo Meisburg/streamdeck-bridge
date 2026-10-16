@@ -9,7 +9,7 @@
 </p>
 
 Turn an Elgato Stream Deck into a macro pad for your **Android phone**. Press a key,
-and pre-written text lands in whatever app is focused — a chat app, an AI agent, a
+and pre-written text lands in whatever app is focused: a chat app, an AI agent, a
 terminal. No root, no accounts, no network calls.
 
 ## Quickstart
@@ -24,29 +24,29 @@ terminal. No root, no accounts, no network calls.
 
 ## Set up the typing service
 
-**This is the step people miss.** Android does not let an app enable its own
-accessibility service — that is the malware protection — so this one is manual.
+This is the step people miss. Android does not let an app enable its own
+accessibility service, because that is the malware protection, so this one is manual.
 
-1. Open the app → **Deck setup** → **Enable typing service**.
+1. Open the app, tap **Deck setup**, then **Enable typing service**.
 2. You land in Settings. Find **SD Bridge** and turn it on.
 
-It survives reboots and app updates. It does **not** survive a reinstall or a data
-clear; redo it then. (See [Troubleshooting](#troubleshooting) if keys press and
-nothing types.)
+It survives reboots and app updates. It does not survive a reinstall or a data
+clear, so redo it then. If keys press and nothing types, see
+[Troubleshooting](#troubleshooting).
 
 Then plug in the deck and allow the USB permission when Android asks.
 
-**Done.** Open any app, tap its text field, press a deck key.
+That is the whole setup. Open any app, tap its text field, press a deck key.
 
 ---
 
 ## More
 
-- [The 15 default keys](#the-15-default-commands) — what ships, and how to change it
-- [Chatting with your AI agent](#chatting-with-your-ai-agent-from-the-deck) — the intended use case
+- [The 15 default keys](#the-15-default-commands): what ships, and how to change it
+- [Chatting with your AI agent](#chatting-with-your-ai-agent-from-the-deck): the intended use case
 - [Troubleshooting](#troubleshooting) · [Requirements](#requirements) · [Limitations](#known-limitations)
-- [The accessibility disclosure](#the-accessibility-disclosure) — what it can and cannot see
-- [How the deck protocol works](#how-the-deck-protocol-works) — for people modifying it
+- [The accessibility disclosure](#the-accessibility-disclosure): what it can and cannot see
+- [How the deck protocol works](#how-the-deck-protocol-works): for people modifying it
 
 ---
 
@@ -54,10 +54,10 @@ Then plug in the deck and allow the USB permission when Android asks.
 
 **Keys press, but nothing types.** The accessibility grant is off. Check the red
 banner at the top of the app; it links straight to the setting. Unplugging the deck
-does not affect this — reinstalling the app or clearing its data does.
+does not affect this. Reinstalling the app or clearing its data does.
 
-**Labels are blank on the deck.** Tap **Deck setup** → **Re-arm keys**. It also
-re-arms itself after a period of silence.
+**Labels are blank on the deck.** Tap **Deck setup**, then **Re-arm keys**. It also re-arms itself after a
+period of silence.
 
 **Build fails with `IllegalArgumentException: 26.0.2.1`.** You used plain `./gradlew`
 on Java 26+. Use `./build.sh`, which pins JDK 21.
@@ -66,16 +66,14 @@ on Java 26+. Use `./build.sh`, which pins JDK 21.
 
 - An Android phone with **USB host support** (OTG). No OTG? The tap grid still works.
 - Android 9.0 (API 29) or newer.
-- An **Elgato Stream Deck** — MK.2 and the 15-key models are what this was built against.
+- An Elgato Stream Deck. MK.2 and the 15-key models are what this was built against.
 - A USB-C to USB-A cable or adapter.
 
 ---
 
 ## Chatting with your AI agent from the deck
 
-This is the use case the app was built for, so it is worth spelling out.
-
-The idea: **your agent is a conversation, and a conversation is mostly a handful of things you say over and over.** "What do you recommend?" "Continue." "Explain that more simply." "Undo that." Typing those on a phone keyboard is friction, and friction is what stops you from steering the agent at all. So each one becomes a physical key.
+Your agent is a conversation, and a conversation is mostly a handful of things you say over and over. "What do you recommend?" "Continue." "Explain that more simply." "Undo that." Typing those on a phone keyboard is friction, and friction is what stops you from steering the agent at all. So each one becomes a physical key.
 
 ### Why a deck instead of just typing
 
@@ -90,14 +88,14 @@ The deck does not make the agent smarter. It removes the cost of steering it, so
 
 ### The one thing to understand first
 
-A key can send **any text**. Plain words, or a slash command.
+A key can send any text: plain words, or a slash command.
 
 - Plain words (`approved`, `undo that last change`) are just a message. The agent reads them like anything you typed.
 - A slash command (`/to-spec`, `/handoff`) triggers a named capability in the agent's own harness.
 
-Nothing special is needed to support slash commands. The text is typed and submitted like any other entry. But it is the interesting half: it means a key can launch a *capability*, not just say something.
+Nothing special is needed to support slash commands. The text is typed and submitted like any other entry. Because it can name a capability, a key can also start one.
 
-**A slash key only works if your agent actually has that skill installed.** If it does not, the key types a line the agent cannot interpret, which looks like the key failing. Every slash command below names a skill from [mattpocock/skills](https://github.com/mattpocock/skills); install that set first, or edit the keys to match whatever your agent answers to.
+A slash key only works if your agent has that skill installed. If it does not, the key types a line the agent cannot interpret, which looks like the key failing. Every slash command below names a skill from [mattpocock/skills](https://github.com/mattpocock/skills); install that set first, or edit the keys to match whatever your agent answers to.
 
 ### Setup
 
@@ -131,7 +129,7 @@ Row 3   Undo        Handoff    Diagnose    Retro      Improve
 
 Every key is editable. These are a starting point, and the whole point of the app is that you replace them with your own.
 
-### Row 1 — align on what to build
+### Row 1: align on what to build
 
 | Key | Sends | What it is for |
 | :--- | :--- | :--- |
@@ -143,7 +141,7 @@ Every key is editable. These are a starting point, and the whole point of the ap
 
 `Ask Matt` and `Grill` are the two halves of the same idea: `ask-matt` is the router, and `grill-with-docs` is the one you end up in most often. The point of a grilling session is to close the gap between what you think you asked for and what the agent understood, before any code exists.
 
-### Row 2 — spec, ticket, build, review, ship
+### Row 2: spec, ticket, build, review, ship
 
 | Key | Sends | What it is for |
 | :--- | :--- | :--- |
@@ -153,9 +151,9 @@ Every key is editable. These are a starting point, and the whole point of the ap
 | **Code review** | `/code-review` | Two-axis review of the diff: does it follow the repo's standards, and does it match the spec. |
 | **PR** | `/pr` | Shapes the pull request body: the smallest visual that makes the change clear, before/after evidence, and a merge-danger call. |
 
-> **Keep Row 1 in one unbroken context window.** `ask-matt`, `grill-with-docs`, `to-spec` and `to-tickets` are meant to build on the same thinking. Do not compact or clear the conversation between them. That is why those four are the four keys of row 1 rather than spread across rows.
+> **Keep Row 1 in one unbroken context window.** `ask-matt`, `grill-with-docs`, `to-spec` and `to-tickets` are meant to build on the same thinking. Do not compact or clear the conversation between them. That is why those four sit together on row 1.
 
-### Row 3 — leave the build
+### Row 3: leave the build
 
 | Key | Sends | What it is for |
 | :--- | :--- | :--- |
@@ -179,10 +177,10 @@ Two of these are deliberately **not** on the deck: `grilling` and `codebase-desi
 
 The defaults are one workflow. Yours will differ.
 
-Tap any key to edit it. Long-press for **Edit / Clear / Send as-is**. Two fields matter:
+Tap any key to edit it. Long-press for Edit, Clear, or Send-as-is. Two fields matter:
 
-- **Button name** — what the key face shows. Keep it short; it auto-sizes to fit, but shorter is more readable at a glance.
-- **Text to send** — the literal text, or the slash command.
+- Button name: what the key face shows. Keep it short. It auto-sizes to fit, but shorter reads better at a glance.
+- Text to send: the literal text, or the slash command.
 
 If most of your keys end up being plain phrases you type a lot ("looks good, continue", "check that against the spec"), that is the app working as intended.
 
@@ -262,8 +260,8 @@ nobody supports yet, start there.
   report.
 - **Key images are rotated 180 degrees** relative to what you send. This was
   carried as an unverified assumption for a while, because no image had ever
-  reached the panel — the writes were silently being dropped for an unrelated
-  reason. The first face that did appear was upside down, which settled it.
+  reached the panel, because the writes were silently being dropped for an
+  unrelated reason. The first face that did appear was upside down, which settled it.
 - **MTP fights you for the device.** The `com.android.mtp` stack grabs the deck via
   a wildcard USB filter. The app detaches it, which is why the "which app owns this
   USB device" question matters.
@@ -276,7 +274,7 @@ The app handles all of this; this section exists for people modifying it.
 
 ## Known limitations
 
-Honest list, not a wish list.
+Things that do not work yet.
 
 - **Some apps cannot confirm a send.** Text arrives, but the app cannot always
   tell whether the send button registered, so the notification says
@@ -335,9 +333,9 @@ exactly the read timeout, and a guess about why would have been wrong.
 
 ## Why this exists
 
-I'm constantly on the go, and I wanted my phone to drive my agents, not just read
-them. Voice gets me most of the way — but there are plenty of moments where I
-can't talk out loud. A meeting, a sleeping kid, a coffee shop. In those moments,
+I'm constantly on the go, and I wanted to drive my agents from my phone rather
+than only read them. Voice gets me most of the way, but there are moments where I can't talk out
+loud. A meeting, a sleeping kid, a coffee shop. In those moments,
 typing every prompt on a phone keyboard is the thing that stops me steering at
 all.
 
