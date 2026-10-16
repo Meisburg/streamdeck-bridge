@@ -8,71 +8,60 @@
   <em>A physical deck, an Android phone, and a cable. Press a key, and the text lands in your agent.</em>
 </p>
 
-Turn an Elgato Stream Deck into a macro pad for your **Android phone**. Press a
-physical deck key, and pre-written text lands in whatever app is focused: a chat
-app, an AI agent, a notes field, anywhere you'd otherwise type.
+Turn an Elgato Stream Deck into a macro pad for your **Android phone**. Press a key,
+and pre-written text lands in whatever app is focused — a chat app, an AI agent, a
+terminal. No root, no accounts, no network calls.
 
-[Install](#install) · [The 15 default keys](#the-15-default-commands) · [Why this exists](#why-this-exists) · [Limitations](#known-limitations)
+## Quickstart
+
+1. **Get it.** Download the APK from [Releases](https://github.com/Meisburg/streamdeck-bridge/releases), or build from source:
+
+   ```bash
+   git clone https://github.com/Meisburg/streamdeck-bridge
+   cd streamdeck-bridge && ./build.sh
+   adb install app/build/outputs/apk/debug/app-debug.apk
+   ```
+
+2. **Turn on the typing service.** Open the app → **Deck setup** → **Enable typing service**. In the Settings screen that opens, turn on **SD Bridge**.
+
+3. **Plug in the deck.** Allow the USB permission when Android asks.
+
+**Then send:** open any app, tap its text field, press a deck key. That is the whole
+workflow.
+
+That is the app. Everything below is reference.
 
 ---
 
-## Install
+## More
 
-Build it yourself; there is no Play Store listing.
+- [Why this exists](#why-this-exists) — the origin story
+- [The 15 default keys](#the-15-default-commands) — what ships, and how to change it
+- [Chatting with your AI agent](#chatting-with-your-ai-agent-from-the-deck) — the intended use case
+- [Troubleshooting](#troubleshooting) · [Requirements](#requirements) · [Limitations](#known-limitations)
+- [The accessibility disclosure](#the-accessibility-disclosure) — what it can and cannot see
+- [How the deck protocol works](#how-the-deck-protocol-works) — for people modifying it
 
-```bash
-git clone https://github.com/Meisburg/streamdeck-bridge
-cd streamdeck-bridge
-./build.sh
-adb install app/build/outputs/apk/debug/app-debug.apk
-```
+---
 
-Or grab the APK from [Releases](https://github.com/Meisburg/streamdeck-bridge/releases), or open the folder in Android Studio and hit Run.
+## Troubleshooting
 
-`build.sh` pins JDK 21 by path. Plain `./gradlew` fails on Java 26 or newer with
-`java.lang.IllegalArgumentException: 26.0.2.1` — the Kotlin Gradle plugin cannot
-parse a four-part version string. Use `./build.sh`, or point
-`org.gradle.java.home` at a JDK 21 install.
+**Keys press, but nothing types.** The accessibility grant is off. Check the red
+banner at the top of the app; it links straight to the setting. Unplugging the deck
+does not affect this — reinstalling the app or clearing its data does.
 
-### First-run setup
+**Labels are blank on the deck.** Tap **Deck setup** → **Re-arm keys**. It also
+re-arms itself after a period of silence.
 
-1. Open **SD Bridge**.
-2. Tap **Deck setup**, then **Enable typing service**.
-3. In the Settings screen that opens, find **SD Bridge** and turn it on.
-4. Plug in your Stream Deck. Android asks for USB permission: allow it.
-
-That's it. The binding survives reboots and app updates.
-
-> **It does not survive a reinstall.** Uninstalling, or clearing the app's data
-> (including `adb shell pm clear`), drops the accessibility grant, and Android
-> gives no way to restore it programmatically — not the app, not ADB. That
-> restriction is deliberate: it is what stops malware granting itself control of
-> your screen. Re-do step 3 after any reinstall or data clear.
+**Build fails with `IllegalArgumentException: 26.0.2.1`.** You used plain `./gradlew`
+on Java 26+. Use `./build.sh`, which pins JDK 21.
 
 ### Requirements
 
 - An Android phone with **USB host support** (OTG). No OTG? The tap grid still works.
 - Android 9.0 (API 29) or newer.
 - An **Elgato Stream Deck** — MK.2 and the 15-key models are what this was built against.
-- A USB-C to USB-A cable or adapter. PD passthrough if you want to charge while decked.
-
----
-
-## Daily use
-
-Nothing to press before a send.
-
-1. Open the app you want text to land in (a chat app, your agent, anything).
-2. Tap its text field.
-3. Press a key, on the phone screen or the physical deck.
-
-If labels go blank after replugging, tap **Deck setup** → **Re-arm keys**. It also
-re-arms itself after a period of silence.
-
-If *nothing types at all* — keys press and the app is fine, but no text appears —
-that is the accessibility grant, not the deck. Check the red banner at the top of
-the app, which links straight to the setting. Unplugging the deck does not affect
-it; reinstalling or clearing app data does.
+- A USB-C to USB-A cable or adapter.
 
 ---
 
