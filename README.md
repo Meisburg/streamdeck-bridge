@@ -19,6 +19,29 @@ and typing on a phone keyboard.
 
 ---
 
+## Why this exists
+
+I'm constantly on the go, and I wanted my phone to drive my agents, not just read
+them. Voice gets me most of the way — but there are plenty of moments where I
+can't talk out loud. A meeting, a sleeping kid, a coffee shop. In those moments,
+typing every prompt on a phone keyboard is the thing that stops me steering at
+all.
+
+I had Stream Decks sitting on my desk. I wondered whether I could press a key and
+have canned text land in my agent.
+
+Elgato ships Windows and Mac software only. No Android. So this is a rebuild of
+what the desktop app does, for a phone.
+
+Getting there meant reverse-engineering the HID protocol, which
+[rea](https://github.com/morluto/rea) made possible: an open-source toolkit for
+taking apart the official software and working out how it talks to the hardware.
+The findings are written up in [How the deck protocol
+works](#how-the-deck-protocol-works) so the next person does not have to
+rediscover them.
+
+---
+
 ## What it does
 
 <p align="center">
@@ -289,13 +312,23 @@ hardware and is the reason it is written that way.
 Documented here because it is the part that took the longest to work out, and the
 next person should not have to rediscover it.
 
+**Credit where it is due:** these findings came from reverse-engineering the
+official desktop app with [rea](https://github.com/morluto/rea), an open-source
+toolkit for inspecting how a closed-source app talks to its hardware. Everything
+below is the result of that work, checked against a live MK.2 (PID `0x006D`) rather
+than taken on faith. If you are trying to drive this hardware from a platform
+nobody supports yet, start there.
+
 - **The deck is not a keyboard.** Android has no driver for it, and it will not be
   treated as a standard HID input device. Its input endpoint cannot be read with
   plain blocking reads on Android; they return `-1` forever.
 - **The deck must be woken** with a feature report before it sends key reports.
 - **Key payload lands one byte per key at offset `+0x04`** of a 512-byte input
   report.
-- **Key images are rotated 180 degrees** relative to what you send.
+- **Key images are rotated 180 degrees** relative to what you send. This was
+  carried as an unverified assumption for a while, because no image had ever
+  reached the panel — the writes were silently being dropped for an unrelated
+  reason. The first face that did appear was upside down, which settled it.
 - **MTP fights you for the device.** The `com.android.mtp` stack grabs the deck via
   a wildcard USB filter. The app detaches it, which is why the "which app owns this
   USB device" question matters.
