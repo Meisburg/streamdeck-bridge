@@ -41,12 +41,13 @@ parse a four-part version string. Use `./build.sh`, or point
 3. In the Settings screen that opens, find **SD Bridge** and turn it on.
 4. Plug in your Stream Deck. Android asks for USB permission: allow it.
 
-That's it. The binding persists across reboots.
+That's it. The binding survives reboots and app updates.
 
-> **Do not clear the app's data** (or run `adb shell pm clear`) unless you are
-> prepared to redo step 3. Android wipes the accessibility grant with the data,
-> and **nothing** can restore it programmatically: not the app, not ADB. That is
-> deliberate, and it is why the toggle is manual.
+> **It does not survive a reinstall.** Uninstalling, or clearing the app's data
+> (including `adb shell pm clear`), drops the accessibility grant, and Android
+> gives no way to restore it programmatically — not the app, not ADB. That
+> restriction is deliberate: it is what stops malware granting itself control of
+> your screen. Re-do step 3 after any reinstall or data clear.
 
 ### Requirements
 
@@ -67,6 +68,11 @@ Nothing to press before a send.
 
 If labels go blank after replugging, tap **Deck setup** → **Re-arm keys**. It also
 re-arms itself after a period of silence.
+
+If *nothing types at all* — keys press and the app is fine, but no text appears —
+that is the accessibility grant, not the deck. Check the red banner at the top of
+the app, which links straight to the setting. Unplugging the deck does not affect
+it; reinstalling or clearing app data does.
 
 ---
 
