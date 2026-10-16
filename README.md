@@ -4,49 +4,35 @@
   <img src="screenshots/hero.png" alt="A Stream Deck plugged into an Android phone, its keys labelled with agent commands, with the phone running a terminal session" width="320">
 </p>
 
-<p align="center">
-  <em>A physical deck, an Android phone, and a cable. Press a key, and the text lands in your agent.</em>
-</p>
+Press a physical Stream Deck key, and pre-written text lands in whatever app is open
+on your Android phone. Built for driving an AI agent from your pocket.
 
-Turn an Elgato Stream Deck into a macro pad for your **Android phone**. Press a key,
-and pre-written text lands in whatever app is focused: a chat app, an AI agent, a
-terminal. No root, no accounts, no network calls.
+## Install
 
-## Quickstart
+Download the APK from [Releases](https://github.com/Meisburg/streamdeck-bridge/releases) and open it. Or build from source:
 
-1. **Get it.** Download the APK from [Releases](https://github.com/Meisburg/streamdeck-bridge/releases), or build from source:
+```bash
+git clone https://github.com/Meisburg/streamdeck-bridge
+cd streamdeck-bridge && ./build.sh
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
 
-   ```bash
-   git clone https://github.com/Meisburg/streamdeck-bridge
-   cd streamdeck-bridge && ./build.sh
-   adb install app/build/outputs/apk/debug/app-debug.apk
-   ```
-
-## Set up the typing service
-
-This is the step people miss. Android does not let an app enable its own
-accessibility service, because that is the malware protection, so this one is manual.
+## Set it up
 
 1. Open the app, tap **Deck setup**, then **Enable typing service**.
-2. You land in Settings. Find **SD Bridge** and turn it on.
+2. You land in Settings. Find **SD Bridge** and turn it on. Android makes you do this by hand.
 
-It survives reboots and app updates. It does not survive a reinstall or a data
-clear, so redo it then. If keys press and nothing types, see
-[Troubleshooting](#troubleshooting).
+Plug in the deck and allow the USB permission when Android asks.
 
-Then plug in the deck and allow the USB permission when Android asks.
+## Use it
 
-That is the whole setup. Open any app, tap its text field, press a deck key.
+Open any app, tap its text field, press a key. That is the whole workflow.
 
 ---
 
-## More
+Everything below is reference. You do not need it to get started.
 
-- [The 15 default keys](#the-15-default-commands): what ships, and how to change it
-- [Chatting with your AI agent](#chatting-with-your-ai-agent-from-the-deck): the intended use case
-- [Troubleshooting](#troubleshooting) · [Requirements](#requirements) · [Limitations](#known-limitations)
-- [The accessibility disclosure](#the-accessibility-disclosure): what it can and cannot see
-- [How the deck protocol works](#how-the-deck-protocol-works): for people modifying it
+[The 15 default keys](#the-15-default-commands) · [Troubleshooting](#troubleshooting) · [Accessibility disclosure](#the-accessibility-disclosure) · [Deck protocol](#how-the-deck-protocol-works) · [Limitations](#known-limitations) · [Why this exists](#why-this-exists)
 
 ---
 
