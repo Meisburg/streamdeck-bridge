@@ -40,8 +40,6 @@ Slash commands require the corresponding skills to be installed. The defaults us
 - Commands are stored locally.
 - Accessibility access is used to locate the focused field and enter your configured text.
 
-[How it works](#how-it-works) · [Troubleshooting](#troubleshooting) · [License](#license)
-
 ## Troubleshooting
 
 - **Nothing types:** Reenable the SD Bridge accessibility service.
