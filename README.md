@@ -7,7 +7,7 @@ Turn a physical Stream Deck into a command pad for AI agents on Android. Approve
 
 **Platform:** Android only. There is no iOS version, and none is in progress.
 
-**Hardware:** Built and tested against the Elgato Stream Deck MK.2 ([20GAA9902](https://www.elgato.com/)). The original MK.2 (`20GAA9901`) uses the same code path but is untested on real hardware. If you have a different model and want it supported, a pull request is welcome.
+**Hardware:** Built and tested against the Elgato Stream Deck MK.2 ([20GAA9902](https://www.amazon.com/dp/B09738CV2G?lv=shuf&channelId=500&plpRedirect=mhFallback&th=1)). The original MK.2 (`20GAA9901`) uses the same code path but is untested on real hardware. If you have a different model and want it supported, a pull request is welcome.
 
 <p align="center">
   <img src="screenshots/hero.png" alt="SD Bridge connecting a physical Stream Deck to an Android phone" width="340">
