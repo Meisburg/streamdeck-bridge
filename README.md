@@ -7,6 +7,8 @@ Turn a physical Stream Deck into a command pad for AI agents on Android. Approve
 
 **Platform:** Android only. iOS support is planned.
 
+**Hardware:** Built for the [Elgato Stream Deck 20GAA9901](https://www.elgato.com/). Other models may not be compatible. Pull requests to add support for other models are welcome.
+
 <p align="center">
   <img src="screenshots/hero.png" alt="SD Bridge connecting a physical Stream Deck to an Android phone" width="340">
 </p>
@@ -19,7 +21,7 @@ Turn a physical Stream Deck into a command pad for AI agents on Android. Approve
 4. Connect your Stream Deck via USB and grant permission.
 5. Open your AI agent, focus its input field, and press a key.
 
-**Requires:** Android 9+, USB host support, a compatible Elgato Stream Deck, and a USB adapter or cable.
+**Requires:** Android 9+, USB host support, a compatible Stream Deck, and a USB adapter or cable.
 
 ## What can you do?
 
@@ -50,6 +52,10 @@ No networking, telemetry, or analytics. Commands are stored locally. Accessibili
 ## How it works
 
 SD Bridge communicates directly with the Stream Deck over USB and types into the focused Android text field. Submission via Enter or a send button works where supported.
+
+## Contributing
+
+Have a different Stream Deck model? Pull requests adding compatibility are welcome.
 
 ## License
 
