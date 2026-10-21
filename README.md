@@ -53,6 +53,34 @@ No networking, telemetry, or analytics. Commands are stored locally. Accessibili
 
 SD Bridge communicates directly with the Stream Deck over USB and types into the focused Android text field. Submission via Enter or a send button works where supported.
 
+Under the hood: the app claims the deck's HID interface directly through Android's USB host API, with no root and no Elgato drivers. Key images are written to the panel as HID feature reports; key presses arrive as HID input reports, one byte per key. Getting from there to text in an arbitrary app is the harder half, and the engineering notes below cover why.
+
+## Engineering notes
+
+The parts that were not obvious, kept here because they cost time to discover.
+
+**No root, and no vendor software.** Android's `UsbManager` exposes the deck as a HID device. `openDevice()` plus `claimInterface()` is enough to drive it, provided no other package wins the enumeration race first.
+
+**The deck stays mute until it receives a feature write.** It does not report key presses on a fresh connection even though it enumerates cleanly. The first control transfer that succeeds on the feature path is what enables input reporting. A device that lights up but never reports a press is a device that never got that write.
+
+**Termux cannot be typed into by accessibility.** `com.termux.view.TerminalView` has no editable node, so `ACTION_SET_TEXT` does nothing there. Termux accepts keystrokes only from an input method. The app therefore ships a minimal IME (`DeckKeyboardService`) that renders no UI and exists solely to hold the `InputConnection`, which lets text arrive at the prompt as if typed. When the IME is not active the app falls back to Termux's `RUN_COMMAND` shell API, which works but is invisible to the user.
+
+**Chat apps need a different path than terminal apps.** For apps with a real `EditText`, `ACTION_SET_TEXT` followed by `ACTION_IME_ENTER` is reliable. Reflective `KeyEvent` injection is not: it frequently lands in the wrong field or duplicates the submit. The two paths are deliberate, not one fallback for the other.
+
+**Key images must be rotated 180 degrees** before they render correctly. Without it the panel accepts the image and displays nothing.
+
+**The USB link can degrade to permanent silence.** When the system `com.android.mtp` service wins the device, the app can still get a successful `openDevice()` and `claimInterface()` while every `controlTransfer` returns -1. The symptom looks like a dead device. Third-party handlers can be disabled to reduce the contention; MTP is a system priv-app and cannot be removed without root. A powered hub changes the enumeration path and is the practical workaround.
+
+**Reader and writer need separate single-thread dispatchers.** Sharing one dispatcher lets the input reader starve the writer, which presents as intermittent image corruption rather than as a threading problem.
+
+**Key protocol and environment details** live in the skill referenced in the commit history, and in `PHONE-CHANGES.md` for the phone-side setup.
+
+## Built by
+
+Jon Meisburg — AI Product Engineer, Seattle. [LinkedIn](https://www.linkedin.com/in/jonmeisburg) · [GitHub](https://github.com/Meisburg)
+
+Reverse engineered from Elgato's own macOS package to learn the HID protocol, then rebuilt as a native Android implementation with no vendor dependency.
+
 ## Contributing
 
 Have a different Stream Deck model? Pull requests adding compatibility are welcome.
